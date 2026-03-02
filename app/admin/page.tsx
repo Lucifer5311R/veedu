@@ -1,8 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { signOut } from 'next-auth/react';
+import { BOOKMARKLET_CODE } from '@/lib/bookmarklet';
 import { Product } from '@/lib/types';
 
 const sidebarItems = [
@@ -73,6 +74,8 @@ export default function AdminPage() {
     const [importLoading, setImportLoading] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
     const [importSuccess, setImportSuccess] = useState(false);
+    const [showBookmarkletFallback, setShowBookmarkletFallback] = useState(false);
+    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Load staged products from API on mount
     useEffect(() => {
@@ -167,6 +170,7 @@ export default function AdminPage() {
         setImportLoading(true);
         setImportError(null);
         setImportSuccess(false);
+        setShowBookmarkletFallback(false);
         try {
             const res = await fetch('/api/admin/fetch-meesho', {
                 method: 'POST',
@@ -181,12 +185,41 @@ export default function AdminPage() {
                 setTimeout(() => setImportSuccess(false), 4000);
             } else {
                 setImportError(data.error || 'Failed to import product');
+                setShowBookmarkletFallback(true);
             }
         } catch {
             setImportError('Network error. Please try again.');
+            setShowBookmarkletFallback(true);
         } finally {
             setImportLoading(false);
         }
+    };
+
+    // Open the Meesho URL in a new tab and poll for new staged products
+    const handleOpenAndPoll = () => {
+        if (!importUrl.trim()) return;
+        window.open(importUrl.trim(), '_blank');
+        // Poll every 4s for up to 2 min — picks up products added via bookmarklet
+        if (pollRef.current) clearInterval(pollRef.current);
+        let attempts = 0;
+        pollRef.current = setInterval(async () => {
+            attempts++;
+            try {
+                const res = await fetch('/api/products?status=staged');
+                if (res.ok) {
+                    const latest: Product[] = await res.json();
+                    if (latest.length > stagedProducts.length) {
+                        setStagedProducts(latest);
+                        setImportUrl('');
+                        setShowBookmarkletFallback(false);
+                        setImportSuccess(true);
+                        setTimeout(() => setImportSuccess(false), 4000);
+                        if (pollRef.current) clearInterval(pollRef.current);
+                    }
+                }
+            } catch { /* ignore */ }
+            if (attempts >= 30 && pollRef.current) clearInterval(pollRef.current);
+        }, 4000);
     };
 
     return (
@@ -297,7 +330,7 @@ export default function AdminPage() {
                                         type="url"
                                         placeholder="https://meesho.com/product/..."
                                         value={importUrl}
-                                        onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
+                                        onChange={e => { setImportUrl(e.target.value); setImportError(null); setShowBookmarkletFallback(false); }}
                                         onKeyDown={e => e.key === 'Enter' && handleImport()}
                                         className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
                                         style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
@@ -309,14 +342,49 @@ export default function AdminPage() {
                                         className="px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
                                         style={{ backgroundColor: 'var(--green)' }}
                                     >
-                                        {importLoading ? '...' : 'Import'}
+                                        {importLoading ? '⏳' : 'Import'}
                                     </button>
                                 </div>
-                                {importError && (
+                                {importLoading && (
+                                    <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>
+                                        Fetching product… this can take 20–30s
+                                    </p>
+                                )}
+                                {importError && !showBookmarkletFallback && (
                                     <p className="text-xs mt-2 font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
                                 )}
                                 {importSuccess && (
                                     <p className="text-xs mt-2 font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>
+                                )}
+
+                                {/* Fallback: open page + bookmarklet when server scrape is blocked */}
+                                {showBookmarkletFallback && (
+                                    <div className="mt-3 p-3 rounded-2xl" style={{ backgroundColor: '#FFF8F3', border: '1px solid #FFE8D6' }}>
+                                        <p className="text-xs font-bold mb-2" style={{ color: 'var(--accent)' }}>
+                                            Auto-import blocked — use the bookmarklet instead:
+                                        </p>
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <button
+                                                onClick={handleOpenAndPoll}
+                                                disabled={!importUrl.trim()}
+                                                className="px-4 py-2 rounded-full text-xs font-bold text-white transition-all hover:scale-105 disabled:opacity-50"
+                                                style={{ backgroundColor: 'var(--accent)' }}
+                                            >
+                                                1. Open in Meesho ↗
+                                            </button>
+                                            <a
+                                                href={BOOKMARKLET_CODE}
+                                                className="px-4 py-2 rounded-full text-xs font-bold transition-all hover:scale-105 cursor-grab"
+                                                style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
+                                                onClick={e => { e.preventDefault(); alert("Drag this button to your browser's bookmarks bar first, then click it on the opened Meesho page."); }}
+                                            >
+                                                2. Drag bookmarklet ✦
+                                            </a>
+                                        </div>
+                                        <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>
+                                            This page will auto-update when you click the bookmarklet on the product page.
+                                        </p>
+                                    </div>
                                 )}
                             </div>
                         </div>
