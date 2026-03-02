@@ -35,16 +35,54 @@ export async function POST(req: NextRequest) {
             'Accept-Language': 'en-US,en;q=0.9',
         });
 
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await page.goto(url, { waitUntil: 'load', timeout: 45000 });
 
-        // Wait for the product title to be rendered by React
-        await page.waitForSelector('h1', { timeout: 15000 });
+        // Wait until h1 has actual text content (React has hydrated)
+        try {
+            await page.waitForFunction(
+                () => {
+                    const h1 = document.querySelector('h1');
+                    return h1 && h1.textContent && h1.textContent.trim().length > 3;
+                },
+                { timeout: 20000 }
+            );
+        } catch {
+            // h1 didn't appear — page might still be usable via meta tags
+        }
 
-        // Extract title
-        const title: string = await page.$eval('h1', (el: HTMLElement) => el.innerText.trim());
+        // Extract title — try h1 first, then og:title meta, then page title
+        let title: string = '';
+        try {
+            title = await page.$eval('h1', (el: HTMLElement) => el.innerText.trim());
+        } catch { /* h1 not found */ }
 
-        // Extract price — look for elements containing ₹
+        if (!title) {
+            try {
+                title = await page.$eval(
+                    'meta[property="og:title"]',
+                    (el: Element) => (el as HTMLMetaElement).content.trim()
+                );
+            } catch { /* meta not found */ }
+        }
+
+        if (!title) {
+            // Strip "| Meesho" suffixes from page <title>
+            const pageTitle = await page.title();
+            title = pageTitle.replace(/\s*[|\-–]\s*meesho.*/i, '').trim();
+        }
+
+        // Extract price — try JSON-LD structured data first (most reliable), then DOM walk
         const price: number = await page.evaluate(() => {
+            // 1. JSON-LD
+            const scripts = Array.from(document.querySelectorAll('script[type="application/ld+json"]'));
+            for (const s of scripts) {
+                try {
+                    const data = JSON.parse(s.textContent || '');
+                    const p = data?.offers?.price || data?.price;
+                    if (p) return parseInt(String(p), 10);
+                } catch { /* skip */ }
+            }
+            // 2. DOM leaf nodes containing ₹
             const all = Array.from(document.querySelectorAll('*'));
             for (const el of all) {
                 const text = (el as HTMLElement).innerText || '';
@@ -53,7 +91,7 @@ export async function POST(req: NextRequest) {
                     return parseInt(m[1].replace(/,/g, ''), 10);
                 }
             }
-            // Fallback: any ₹ in the page text
+            // 3. Full body text
             const bodyText = document.body.innerText;
             const fallback = bodyText.match(/₹\s*([0-9,]+)/);
             return fallback ? parseInt(fallback[1].replace(/,/g, ''), 10) : 0;
