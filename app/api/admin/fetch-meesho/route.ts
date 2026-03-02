@@ -3,6 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { auth } from '@/auth';
 import { Product } from '@/lib/types';
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const { chromium } = require('playwright-extra');
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+
+chromium.use(StealthPlugin());
 
 const DATA_FILE = path.join(process.cwd(), 'data', 'products.json');
 
@@ -18,61 +24,55 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Invalid Meesho URL' }, { status: 400 });
     }
 
+    let browser = null;
     try {
-        // Fetch the Meesho page HTML server-side
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Cache-Control': 'no-cache',
-                'Referer': 'https://www.meesho.com/',
-            },
+        browser = await chromium.launch({ headless: true });
+        const page = await browser.newPage();
+
+        // Set realistic viewport and extra headers
+        await page.setViewportSize({ width: 1280, height: 800 });
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
         });
 
-        if (!response.ok) {
-            return NextResponse.json({ error: `Failed to fetch page: ${response.status}` }, { status: 502 });
-        }
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        const html = await response.text();
+        // Wait for the product title to be rendered by React
+        await page.waitForSelector('h1', { timeout: 15000 });
 
-        // Extract title from <h1> tag
-        const titleMatch = html.match(/<h1[^>]*>(.*?)<\/h1>/ui);
-        let title: string | null = titleMatch
-            ? titleMatch[1].replace(/<[^>]+>/g, '').trim()
-            : null;
+        // Extract title
+        const title: string = await page.$eval('h1', (el: HTMLElement) => el.innerText.trim());
 
-        // Fallback: og:title meta tag
-        if (!title) {
-            const metaTitleMatch = html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/i)
-                || html.match(/<meta[^>]+content="([^"]+)"[^>]+property="og:title"/i);
-            if (metaTitleMatch) title = metaTitleMatch[1].trim();
-        }
-
-        // Extract price from ₹ symbol
-        const priceMatch = html.match(/\u20b9\s*([0-9,]+)/u);
-        let price: number | null = priceMatch ? parseInt(priceMatch[1].replace(/,/g, ''), 10) : null;
-
-        // Fallback: JSON-LD price
-        if (!price) {
-            const jsonPriceMatch = html.match(/"price"\s*:\s*"?([0-9]+)"?/);
-            if (jsonPriceMatch) price = parseInt(jsonPriceMatch[1], 10);
-        }
+        // Extract price — look for elements containing ₹
+        const price: number = await page.evaluate(() => {
+            const all = Array.from(document.querySelectorAll('*'));
+            for (const el of all) {
+                const text = (el as HTMLElement).innerText || '';
+                const m = text.match(/₹\s*([0-9,]+)/);
+                if (m && el.children.length === 0) {
+                    return parseInt(m[1].replace(/,/g, ''), 10);
+                }
+            }
+            // Fallback: any ₹ in the page text
+            const bodyText = document.body.innerText;
+            const fallback = bodyText.match(/₹\s*([0-9,]+)/);
+            return fallback ? parseInt(fallback[1].replace(/,/g, ''), 10) : 0;
+        });
 
         // Extract product images from Meesho CDN
-        const imgRegex = /<img[^>]+src="([^"]+images\.meesho\.com\/images\/products\/[^"]+)"/g;
-        const images: string[] = [];
-        let m: RegExpExecArray | null;
-        while ((m = imgRegex.exec(html)) !== null) {
-            images.push(m[1].replace(/_\d+\.jpg/g, '_512.jpg'));
-        }
-        const uniqueImages = Array.from(new Set(images))
-            .filter(i => !i.includes('profile'))
-            .slice(0, 4);
+        const images: string[] = await page.$$eval(
+            'img[src*="images.meesho.com/images/products"]',
+            (imgs: HTMLImageElement[]) =>
+                imgs
+                    .map((img) => img.src.replace(/_\d+\.jpg/, '_512.jpg'))
+                    .filter((src) => !src.includes('profile'))
+                    .slice(0, 4)
+        );
+        const uniqueImages = Array.from(new Set(images));
 
         if (!title || !price) {
             return NextResponse.json(
-                { error: 'Could not extract product details. The page may be blocked or the URL is not a product page.' },
+                { error: 'Could not extract product details. Make sure the URL is a valid Meesho product page.' },
                 { status: 422 }
             );
         }
@@ -103,5 +103,7 @@ export async function POST(req: NextRequest) {
     } catch (error) {
         console.error('Meesho fetch error:', error);
         return NextResponse.json({ error: 'Failed to fetch product from Meesho' }, { status: 500 });
+    } finally {
+        if (browser) await browser.close();
     }
 }
