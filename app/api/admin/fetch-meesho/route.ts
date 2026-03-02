@@ -55,16 +55,23 @@ export async function POST(req: NextRequest) {
 
         const page = await context.newPage();
 
+        // Step 1: Visit Meesho homepage first so Akamai Bot Manager can set its
+        // challenge cookies (_abck etc.) on a "safe" page before we visit the product.
+        await page.goto('https://www.meesho.com/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        // Simulate human-like pause
+        await page.waitForTimeout(1500 + Math.floor(Math.random() * 1000));
+
+        // Step 2: Navigate to the actual product page
         await page.goto(url, { waitUntil: 'load', timeout: 45000 });
 
-        // Wait until h1 has actual text content (React has hydrated)
+        // Wait until h1 has actual text content (React has hydrated + Akamai challenge resolved)
         try {
             await page.waitForFunction(
                 () => {
                     const h1 = document.querySelector('h1');
                     return h1 && h1.textContent && h1.textContent.trim().length > 3;
                 },
-                { timeout: 20000 }
+                { timeout: 30000 }
             );
         } catch {
             // Log debug info so we can see what Meesho returned
