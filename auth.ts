@@ -6,14 +6,16 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         CredentialsProvider({
             name: "Credentials",
             credentials: {
+                username: { label: "Username", type: "text" },
                 password: { label: "Password", type: "password" }
             },
             async authorize(credentials) {
-                // Determine the admin password (fallback for dev if env var isn't set)
-                const adminPassword = process.env.ADMIN_PASSWORD || 'veedu2025';
+                const adminUsername = process.env.ADMIN_USERNAME;
+                const adminPassword = process.env.ADMIN_PASSWORD;
 
-                if (credentials?.password === adminPassword) {
-                    // Password matches, return a successful admin user object
+                if (!adminUsername || !adminPassword) return null;
+
+                if (credentials?.username === adminUsername && credentials?.password === adminPassword) {
                     return { id: "1", name: "Veedu Admin", email: "admin@veedu.store" };
                 }
 

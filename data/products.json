@@ -76,5 +76,20 @@
     "status": "published",
     "isNew": true,
     "createdAt": "2026-03-02T12:57:25.334Z"
+  },
+  {
+    "id": "prod_60fb2038-0136-49d8-bd9b-d7643fbd2b50",
+    "title": "DPM Portable Bluetooth Speaker with LED Light & Deep Bass Sound",
+    "description": "High quality dpm portable bluetooth speaker with led light & deep bass sound. Auto-imported from supplier.",
+    "price": 320,
+    "sellingPrice": 456,
+    "images": [
+      "https://images.meesho.com/images/products/794100255/xayvy_512.avif?width=512"
+    ],
+    "category": "Kitchen",
+    "sourceUrl": "https://www.meesho.com/dpm-portable-bluetooth-speaker-with-led-light-deep-bass-sound/p/d4sbof",
+    "status": "published",
+    "isNew": true,
+    "createdAt": "2026-03-02T13:08:23.856Z"
   }
 ]

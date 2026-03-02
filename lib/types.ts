@@ -9,6 +9,7 @@ export interface Product {
     sourceUrl: string;    // Original Meesho link
     status: 'staged' | 'published';
     isNew?: boolean;
+    inStock?: boolean;
     createdAt: string;
 }
 

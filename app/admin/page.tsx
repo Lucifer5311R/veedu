@@ -66,9 +66,11 @@ function SidebarIcon({ type }: { type: string }) {
 export default function AdminPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [stagedProducts, setStagedProducts] = useState<Product[]>([]);
+    const [publishedCount, setPublishedCount] = useState(0);
+    const [categoryBreakdown, setCategoryBreakdown] = useState<Record<string, number>>({});
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-    const [editForm, setEditForm] = useState({ title: '', description: '', category: '', price: 0, sellingPrice: 0 });
+    const [editForm, setEditForm] = useState({ title: '', description: '', category: '', price: 0, sellingPrice: 0, inStock: true });
     const [editImages, setEditImages] = useState<string[]>([]);
     const [newImageUrl, setNewImageUrl] = useState('');
     const [publishSuccess, setPublishSuccess] = useState(false);
@@ -92,7 +94,24 @@ export default function AdminPage() {
                 console.error('Failed to load staged products:', err);
             }
         };
+        const loadPublished = async () => {
+            try {
+                const res = await fetch('/api/products?status=published');
+                if (res.ok) {
+                    const data: Product[] = await res.json();
+                    setPublishedCount(data.length);
+                    const cats: Record<string, number> = {};
+                    for (const p of data) {
+                        cats[p.category] = (cats[p.category] || 0) + 1;
+                    }
+                    setCategoryBreakdown(cats);
+                }
+            } catch (err) {
+                console.error('Failed to load published products:', err);
+            }
+        };
         loadStaged();
+        loadPublished();
     }, []);
 
     const handleDelete = async (productId: string) => {
@@ -128,6 +147,7 @@ export default function AdminPage() {
                     })
                 )
             );
+            setPublishedCount(prev => prev + stagedProducts.length);
             setStagedProducts([]);
             setPublishSuccess(true);
             setTimeout(() => setPublishSuccess(false), 4000);
@@ -148,6 +168,7 @@ export default function AdminPage() {
             category: product.category,
             price: product.price,
             sellingPrice: product.sellingPrice,
+            inStock: product.inStock !== false,
         });
     };
 
@@ -394,7 +415,31 @@ export default function AdminPage() {
                         </div>
                     </div>
 
-                    {/* Success Toast */}
+                    {/* Stats Row */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-10">
+                        <div className="bg-white rounded-2xl p-5 shadow-sm" style={{ border: '1px solid var(--gray-200)' }}>
+                            <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--gray-400)' }}>Published</p>
+                            <p className="text-3xl font-extrabold" style={{ color: 'var(--green)' }}>{publishedCount}</p>
+                        </div>
+                        <div className="bg-white rounded-2xl p-5 shadow-sm" style={{ border: '1px solid var(--gray-200)' }}>
+                            <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--gray-400)' }}>Staged</p>
+                            <p className="text-3xl font-extrabold" style={{ color: 'var(--accent)' }}>{stagedProducts.length}</p>
+                        </div>
+                        <div className="bg-white rounded-2xl p-5 shadow-sm sm:col-span-2" style={{ border: '1px solid var(--gray-200)' }}>
+                            <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--gray-400)' }}>Categories</p>
+                            {Object.keys(categoryBreakdown).length === 0 ? (
+                                <p className="text-sm" style={{ color: 'var(--gray-400)' }}>No published products yet</p>
+                            ) : (
+                                <div className="flex flex-wrap gap-2">
+                                    {Object.entries(categoryBreakdown).map(([cat, count]) => (
+                                        <span key={cat} className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ backgroundColor: '#F0FDF4', color: 'var(--green)' }}>
+                                            {cat} <span style={{ color: 'var(--gray-400)' }}>({count})</span>
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </div>
                     {publishSuccess && (
                         <div className="fixed top-6 right-6 z-50 flex items-center gap-3 px-5 py-3.5 rounded-2xl shadow-lg" style={{ backgroundColor: 'var(--green)', color: 'white' }}>
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -580,6 +625,22 @@ export default function AdminPage() {
                                     <input type="number" value={editForm.sellingPrice} onChange={e => setEditForm(f => ({ ...f, sellingPrice: parseInt(e.target.value) || 0 }))}
                                         className="w-full px-4 py-3 rounded-xl text-sm outline-none" style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }} />
                                 </div>
+                            </div>
+
+                            {/* In Stock Toggle */}
+                            <div className="flex items-center justify-between p-4 rounded-2xl" style={{ backgroundColor: 'var(--gray-100)' }}>
+                                <div>
+                                    <p className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>In Stock</p>
+                                    <p className="text-xs" style={{ color: 'var(--gray-400)' }}>Toggle to show/hide buy button</p>
+                                </div>
+                                <button
+                                    onClick={() => setEditForm(f => ({ ...f, inStock: !f.inStock }))}
+                                    className="relative inline-flex items-center w-12 h-6 rounded-full transition-colors duration-200"
+                                    style={{ backgroundColor: editForm.inStock ? 'var(--green)' : 'var(--gray-300)' }}
+                                >
+                                    <span className="inline-block w-5 h-5 rounded-full bg-white shadow transition-transform duration-200"
+                                        style={{ transform: editForm.inStock ? 'translateX(26px)' : 'translateX(2px)' }} />
+                                </button>
                             </div>
                         </div>
 

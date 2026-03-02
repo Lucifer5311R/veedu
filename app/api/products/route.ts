@@ -68,6 +68,7 @@ export async function POST(req: NextRequest) {
             sourceUrl: body.sourceUrl || '',
             status: body.status || 'staged',
             isNew: true,
+            inStock: true,
             createdAt: new Date().toISOString(),
         };
 

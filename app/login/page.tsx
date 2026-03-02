@@ -8,6 +8,7 @@ import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 
 export default function LoginPage() {
+    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -21,6 +22,7 @@ export default function LoginPage() {
         try {
             const res = await signIn('credentials', {
                 redirect: false,
+                username,
                 password,
             });
 
@@ -61,7 +63,7 @@ export default function LoginPage() {
 
                         <div className="text-center mb-10">
                             <h1 className="text-3xl font-extrabold tracking-tight mb-2" style={{ color: 'var(--foreground)' }}>Admin Access</h1>
-                            <p className="text-sm" style={{ color: 'var(--gray-500)' }}>Enter the master password to manage your catalog.</p>
+                            <p className="text-sm" style={{ color: 'var(--gray-500)' }}>Enter your admin credentials to manage your catalog.</p>
                         </div>
 
                         {error && (
@@ -77,8 +79,40 @@ export default function LoginPage() {
 
                         <form onSubmit={handleSubmit} className="space-y-6">
                             <div>
+                                <label htmlFor="username" className="block text-sm font-bold mb-2 ml-1" style={{ color: 'var(--gray-700)' }}>
+                                    Username
+                                </label>
+                                <div className="relative group">
+                                    <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-[var(--accent)]" style={{ color: 'var(--gray-400)' }}>
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                            <circle cx="12" cy="7" r="4"></circle>
+                                        </svg>
+                                    </div>
+                                    <input
+                                        id="username"
+                                        type="text"
+                                        value={username}
+                                        onChange={(e) => setUsername(e.target.value)}
+                                        className="w-full pl-11 pr-4 py-3.5 rounded-xl text-sm font-medium transition-all outline-none"
+                                        style={{
+                                            backgroundColor: 'var(--gray-100)',
+                                            color: 'var(--foreground)',
+                                            border: '2px solid transparent'
+                                        }}
+                                        placeholder="admin username"
+                                        required
+                                        autoFocus
+                                        autoComplete="username"
+                                        onFocus={(e) => e.target.style.borderColor = 'var(--accent)'}
+                                        onBlur={(e) => e.target.style.borderColor = 'transparent'}
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
                                 <label htmlFor="password" className="block text-sm font-bold mb-2 ml-1" style={{ color: 'var(--gray-700)' }}>
-                                    Master Password
+                                    Password
                                 </label>
                                 <div className="relative group">
                                     <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none transition-colors group-focus-within:text-[var(--accent)]" style={{ color: 'var(--gray-400)' }}>
@@ -100,7 +134,7 @@ export default function LoginPage() {
                                         }}
                                         placeholder="••••••••••••"
                                         required
-                                        autoFocus
+                                        autoComplete="current-password"
                                         onFocus={(e) => e.target.style.borderColor = 'var(--accent)'}
                                         onBlur={(e) => e.target.style.borderColor = 'transparent'}
                                     />
