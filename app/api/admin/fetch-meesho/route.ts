@@ -8,7 +8,12 @@ const { chromium } = require('playwright-extra');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 
-chromium.use(StealthPlugin());
+// Guard against double-registration on HMR reloads
+let stealthRegistered = false;
+if (!stealthRegistered) {
+    chromium.use(StealthPlugin());
+    stealthRegistered = true;
+}
 
 const DATA_FILE = path.join(process.cwd(), 'data', 'products.json');
 
@@ -26,14 +31,29 @@ export async function POST(req: NextRequest) {
 
     let browser = null;
     try {
-        browser = await chromium.launch({ headless: true });
-        const page = await browser.newPage();
-
-        // Set realistic viewport and extra headers
-        await page.setViewportSize({ width: 1280, height: 800 });
-        await page.setExtraHTTPHeaders({
-            'Accept-Language': 'en-US,en;q=0.9',
+        browser = await chromium.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-blink-features=AutomationControlled',
+            ],
         });
+
+        const context = await browser.newContext({
+            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+            viewport: { width: 1280, height: 800 },
+            locale: 'en-IN',
+            timezoneId: 'Asia/Kolkata',
+            extraHTTPHeaders: {
+                'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Referer': 'https://www.meesho.com/',
+            },
+        });
+
+        const page = await context.newPage();
 
         await page.goto(url, { waitUntil: 'load', timeout: 45000 });
 
@@ -47,7 +67,11 @@ export async function POST(req: NextRequest) {
                 { timeout: 20000 }
             );
         } catch {
-            // h1 didn't appear — page might still be usable via meta tags
+            // Log debug info so we can see what Meesho returned
+            const debugUrl = page.url();
+            const debugTitle = await page.title();
+            const debugHtml = (await page.content()).substring(0, 800);
+            console.warn('[Meesho] h1 not found. URL:', debugUrl, '| Title:', debugTitle, '| HTML preview:', debugHtml);
         }
 
         // Extract title — try h1 first, then og:title meta, then page title
@@ -66,10 +90,11 @@ export async function POST(req: NextRequest) {
         }
 
         if (!title) {
-            // Strip "| Meesho" suffixes from page <title>
             const pageTitle = await page.title();
             title = pageTitle.replace(/\s*[|\-–]\s*meesho.*/i, '').trim();
         }
+
+        console.log('[Meesho] Extracted title:', title);
 
         // Extract price — try JSON-LD structured data first (most reliable), then DOM walk
         const price: number = await page.evaluate(() => {
@@ -97,6 +122,8 @@ export async function POST(req: NextRequest) {
             return fallback ? parseInt(fallback[1].replace(/,/g, ''), 10) : 0;
         });
 
+        console.log('[Meesho] Extracted price:', price);
+
         // Extract product images from Meesho CDN
         const images: string[] = await page.$$eval(
             'img[src*="images.meesho.com/images/products"]',
@@ -107,6 +134,8 @@ export async function POST(req: NextRequest) {
                     .slice(0, 4)
         );
         const uniqueImages = Array.from(new Set(images));
+
+        console.log('[Meesho] Extracted images:', uniqueImages.length);
 
         if (!title || !price) {
             return NextResponse.json(
