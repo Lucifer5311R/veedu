@@ -1,0 +1,62 @@
+[
+  {
+    "id": "prod_001",
+    "title": "Airtight Container Set",
+    "description": "Premium stackable containers for organized kitchens. BPA-free material with hermetic seals.",
+    "price": 300,
+    "sellingPrice": 450,
+    "images": [
+      "/images/airtight_container.png"
+    ],
+    "category": "Kitchen",
+    "sourceUrl": "https://meesho.com/example/1",
+    "status": "published",
+    "isNew": true,
+    "createdAt": "2026-02-15T10:00:00Z"
+  },
+  {
+    "id": "prod_002",
+    "title": "Premium Microfiber Cloths",
+    "description": "Super absorbent lint-free cloths for all types of surfaces. Pack of 6.",
+    "price": 200,
+    "sellingPrice": 299,
+    "images": [
+      "/images/microfiber_cloth.png"
+    ],
+    "category": "Laundry",
+    "sourceUrl": "https://meesho.com/example/2",
+    "status": "published",
+    "isNew": false,
+    "createdAt": "2026-02-18T14:00:00Z"
+  },
+  {
+    "id": "prod_003",
+    "title": "Luxury Cotton Towels",
+    "description": "Ultra-soft, high-absorbency cotton towel designed for a spa-like experience at home.",
+    "price": 650,
+    "sellingPrice": 899,
+    "images": [
+      "/images/cotton_towel.png"
+    ],
+    "category": "Home & Bath",
+    "sourceUrl": "https://meesho.com/example/3",
+    "status": "published",
+    "isNew": false,
+    "createdAt": "2026-02-10T09:00:00Z"
+  },
+  {
+    "id": "prod_004",
+    "title": "Modular Drawer Organizer",
+    "description": "Adjustable compartment organizer for drawers. Fits most standard drawer sizes.",
+    "price": 250,
+    "sellingPrice": 350,
+    "images": [
+      "/images/drawer_organizer.png"
+    ],
+    "category": "Organization",
+    "sourceUrl": "https://meesho.com/example/4",
+    "status": "published",
+    "isNew": false,
+    "createdAt": "2026-02-08T11:00:00Z"
+  }
+]
