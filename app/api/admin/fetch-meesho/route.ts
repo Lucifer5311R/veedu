@@ -16,6 +16,23 @@ if (!stealthRegistered) {
 }
 
 const DATA_FILE = path.join(process.cwd(), 'data', 'products.json');
+const useSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+
+async function saveProduct(product: Product) {
+    if (useSupabase) {
+        const { supabase, productToRow } = await import('@/lib/supabase');
+        const { error } = await supabase.from('products').insert(productToRow(product as unknown as Record<string, unknown>));
+        if (error) throw new Error(error.message);
+    } else {
+        let products: Product[] = [];
+        try {
+            const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+            products = JSON.parse(raw);
+        } catch { /* empty file */ }
+        products.push(product);
+        fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2));
+    }
+}
 
 export async function POST(req: NextRequest) {
     const session = await auth();
@@ -164,18 +181,24 @@ export async function POST(req: NextRequest) {
             sourceUrl: url,
             status: 'staged',
             isNew: true,
+            inStock: true,
             createdAt: new Date().toISOString(),
         };
 
-        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-        const products: Product[] = JSON.parse(raw);
-        products.push(newProduct);
-        fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2));
+        await saveProduct(newProduct);
 
         return NextResponse.json({ success: true, product: newProduct });
 
     } catch (error) {
         console.error('Meesho fetch error:', error);
+        const msg = (error instanceof Error ? error.message : String(error));
+        // Playwright / Chromium not available (e.g. on Vercel serverless)
+        if (msg.includes('executable') || msg.includes('chromium') || msg.includes('ENOENT') || msg.includes('browserType')) {
+            return NextResponse.json(
+                { error: 'Browser scraping is not available in this environment. Use the bookmarklet fallback instead.' },
+                { status: 503 }
+            );
+        }
         return NextResponse.json({ error: 'Failed to fetch product from Meesho' }, { status: 500 });
     } finally {
         if (browser) await browser.close();

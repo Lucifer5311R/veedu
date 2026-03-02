@@ -91,5 +91,21 @@
     "status": "published",
     "isNew": true,
     "createdAt": "2026-03-02T13:08:23.856Z"
+  },
+  {
+    "id": "prod_f36b40d8-1e02-4dee-a9e0-a47065a91774",
+    "title": "tvAt Wall Mounted Bathroom Shelf - 8 Brush Slots, Toothbrush Holder and Storage & Cup Holder, Plastic, Multicolor, Bathroom Organizer for Family, Space Saving and Dry Design-4 Cup",
+    "description": "High quality tvat wall mounted bathroom shelf - 8 brush slots, toothbrush holder and storage & cup holder, plastic, multicolor, bathroom organizer for family, space saving and dry design-4 cup. Auto-imported from supplier.",
+    "price": 148,
+    "sellingPrice": 232,
+    "images": [
+      "https://images.meesho.com/images/products/506680965/eim0m_512.avif?width=512"
+    ],
+    "category": "Kitchen",
+    "sourceUrl": "https://www.meesho.com/tvat-wall-mounted-bathroom-shelf-8-brush-slots-toothbrush-holder-and-storage-cup-holder-plastic-multicolor-bathroom-organizer-for-family-space-saving-and-dry-design-4-cup/p/8dnxj9",
+    "status": "published",
+    "isNew": true,
+    "createdAt": "2026-03-02T13:25:18.303Z",
+    "inStock": true
   }
 ]
