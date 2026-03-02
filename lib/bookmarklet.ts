@@ -12,7 +12,7 @@ export const BOOKMARKLET_CODE = `javascript:(function(){
         var price=priceMatch?parseInt(priceMatch[1].replace(/,/g,""),10):0;
         var imgRegex=/<img[^>]+src="([^"]+images\\.meesho\\.com\\/images\\/products\\/[^"]+)"/g;
         var imgs=[];var m;
-        while(m=imgRegex.exec(html)){imgs.push(m[1].replace(/_[0-9]+\\.jpg/g,"_512.jpg"));}
+        while(m=imgRegex.exec(html)){imgs.push(m[1].replace(/_[0-9]+\\.jpg/g,"_1024.jpg"));}
         imgs=Array.from(new Set(imgs)).filter(function(i){return !i.includes("profile")}).slice(0,4);
         var statusBtn=document.createElement("div");
         statusBtn.innerText="Uploading to Veedu...";

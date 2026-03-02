@@ -23,10 +23,19 @@ function writeProducts(products: Product[]) {
     }
 }
 
-// GET /api/products - List published products (or filtered by ?status= for admin)
+// GET /api/products - List published products (or filtered by ?status= / ?id= for admin)
 export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const statusFilter = searchParams.get('status');
+    const idFilter = searchParams.get('id');
+
+    // Single product by ID (public — needed for product detail page)
+    if (idFilter) {
+        const products = readProducts();
+        const product = products.find(p => p.id === idFilter && p.status === 'published');
+        if (!product) return NextResponse.json({ error: 'Product not found' }, { status: 404 });
+        return NextResponse.json(product);
+    }
 
     if (statusFilter) {
         const session = await auth();

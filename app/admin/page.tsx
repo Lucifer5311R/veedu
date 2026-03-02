@@ -69,6 +69,8 @@ export default function AdminPage() {
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
     const [editForm, setEditForm] = useState({ title: '', description: '', category: '', price: 0, sellingPrice: 0 });
+    const [editImages, setEditImages] = useState<string[]>([]);
+    const [newImageUrl, setNewImageUrl] = useState('');
     const [publishSuccess, setPublishSuccess] = useState(false);
     const [importUrl, setImportUrl] = useState('');
     const [importLoading, setImportLoading] = useState(false);
@@ -138,6 +140,8 @@ export default function AdminPage() {
 
     const openEdit = (product: Product) => {
         setEditingProduct(product);
+        setEditImages(product.images || []);
+        setNewImageUrl('');
         setEditForm({
             title: product.title,
             description: product.description,
@@ -153,7 +157,7 @@ export default function AdminPage() {
             const res = await fetch('/api/products', {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: editingProduct.id, ...editForm }),
+                body: JSON.stringify({ id: editingProduct.id, ...editForm, images: editImages }),
             });
             if (res.ok) {
                 const updated = await res.json();
@@ -504,7 +508,55 @@ export default function AdminPage() {
                             </button>
                         </div>
 
-                        <div className="space-y-4">
+                        <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+                            {/* Images */}
+                            <div>
+                                <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--gray-500)' }}>Images</label>
+                                {editImages.length > 0 ? (
+                                    <div className="flex gap-2 flex-wrap mb-2">
+                                        {editImages.map((img, i) => (
+                                            <div key={i} className="relative group w-20 h-20 rounded-2xl overflow-hidden" style={{ backgroundColor: '#F3F4F3' }}>
+                                                <img src={img} alt={`img ${i + 1}`} className="w-full h-full object-cover" />
+                                                <button
+                                                    onClick={() => setEditImages(imgs => imgs.filter((_, idx) => idx !== i))}
+                                                    className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                                                    style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+                                                >
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                                        <line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line>
+                                                    </svg>
+                                                </button>
+                                                {i === 0 && (
+                                                    <span className="absolute bottom-1 left-1 text-[9px] font-bold px-1 rounded" style={{ backgroundColor: 'var(--green)', color: 'white' }}>Main</span>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <p className="text-xs mb-2" style={{ color: 'var(--gray-400)' }}>No images. Paste a URL below to add one.</p>
+                                )}
+                                <div className="flex gap-2">
+                                    <input
+                                        type="url"
+                                        placeholder="Paste image URL…"
+                                        value={newImageUrl}
+                                        onChange={e => setNewImageUrl(e.target.value)}
+                                        onKeyDown={e => {
+                                            if (e.key === 'Enter' && newImageUrl.trim()) {
+                                                setEditImages(imgs => [...imgs, newImageUrl.trim()]);
+                                                setNewImageUrl('');
+                                            }
+                                        }}
+                                        className="flex-1 px-3 py-2 rounded-xl text-xs outline-none" style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
+                                    />
+                                    <button
+                                        onClick={() => { if (newImageUrl.trim()) { setEditImages(imgs => [...imgs, newImageUrl.trim()]); setNewImageUrl(''); } }}
+                                        className="px-4 py-2 rounded-xl text-xs font-bold text-white"
+                                        style={{ backgroundColor: 'var(--green)' }}
+                                    >Add</button>
+                                </div>
+                            </div>
+
                             <div>
                                 <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'var(--gray-500)' }}>Title</label>
                                 <input type="text" value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}

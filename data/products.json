@@ -58,5 +58,23 @@
     "status": "published",
     "isNew": false,
     "createdAt": "2026-02-08T11:00:00Z"
+  },
+  {
+    "id": "prod_12222cf0-5c6b-491b-b77d-bc403b580fa6",
+    "title": "Portronics Mobike 4 Bike Phone Mount with 360?",
+    "description": "High quality portronics mobike 4 bike phone mount with 360?. Auto-imported from supplier.",
+    "price": 262,
+    "sellingPrice": 381,
+    "images": [
+      "https://images.meesho.com/images/products/375476242/fmg2a_512.webp?width=64",
+      "https://images.meesho.com/images/products/375476242/yfbfm_512.webp?width=64",
+      "https://images.meesho.com/images/products/375476242/pbyvf_512.webp?width=64",
+      "https://images.meesho.com/images/products/375476242/sbhdp_512.webp?width=64"
+    ],
+    "category": "Kitchen",
+    "sourceUrl": "https://www.meesho.com/portronics-mobike-4-bike-phone-mount-with-360/p/67jrbm",
+    "status": "published",
+    "isNew": true,
+    "createdAt": "2026-03-02T12:57:25.334Z"
   }
 ]

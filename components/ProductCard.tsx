@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { Product } from '@/lib/types';
 import { useCart } from '@/context/CartProvider';
 import { useWishlist } from '@/context/WishlistProvider';
@@ -17,6 +18,7 @@ export default function ProductCard({ product }: ProductCardProps) {
     return (
         <div className="group relative transition-all duration-500 hover:-translate-y-1">
             {/* Image Container */}
+            <Link href={`/product/${product.id}`} className="block">
             <div
                 className="relative aspect-square overflow-hidden rounded-[2rem] mb-4 transition-transform duration-500 group-hover:shadow-[var(--shadow-lg)]"
                 style={{ backgroundColor: '#F3F4F3' }}
@@ -54,6 +56,7 @@ export default function ProductCard({ product }: ProductCardProps) {
                     </svg>
                 </button>
             </div>
+            </Link>
 
             {/* Info */}
             <div className="px-1">
@@ -73,9 +76,11 @@ export default function ProductCard({ product }: ProductCardProps) {
                 </div>
 
                 {/* Title */}
-                <h3 className="text-sm font-bold mb-3 line-clamp-1" style={{ color: 'var(--foreground)' }}>
+                <Link href={`/product/${product.id}`}>
+                <h3 className="text-sm font-bold mb-3 line-clamp-1 hover:underline" style={{ color: 'var(--foreground)' }}>
                     {product.title}
                 </h3>
+                </Link>
 
                 {/* Price + Add to Cart */}
                 <div className="flex items-center justify-between mt-2">

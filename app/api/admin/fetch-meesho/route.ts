@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
             'img[src*="images.meesho.com/images/products"]',
             (imgs: HTMLImageElement[]) =>
                 imgs
-                    .map((img) => img.src.replace(/_\d+\.jpg/, '_512.jpg'))
+                    .map((img) => img.src.replace(/_\d+\.jpg/, '_1024.jpg'))
                     .filter((src) => !src.includes('profile'))
                     .slice(0, 4)
         );
