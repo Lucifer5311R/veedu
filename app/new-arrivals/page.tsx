@@ -1,24 +1,28 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import ProductCard from '@/components/ProductCard';
-import productsData from '@/data/products.json';
 import { Product } from '@/lib/types';
 
-const newProducts = (productsData as Product[])
-    .filter(p => p.status === 'published' && p.isNew)
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-const allPublished = (productsData as Product[])
-    .filter(p => p.status === 'published')
-    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-
-const products = newProducts.length > 0 ? newProducts : allPublished;
-
 export default function NewArrivalsPage() {
+    const [products, setProducts] = useState<Product[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        fetch('/api/products')
+            .then(r => r.json())
+            .then((data: Product[]) => {
+                if (!Array.isArray(data)) { setProducts([]); return; }
+                const newOnes = data.filter(p => p.isNew).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+                setProducts(newOnes.length > 0 ? newOnes : data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+            })
+            .catch(() => setProducts([]))
+            .finally(() => setLoading(false));
+    }, []);
+
     return (
         <div className="min-h-screen" style={{ backgroundColor: 'var(--background)' }}>
             <Navbar />
@@ -31,7 +35,13 @@ export default function NewArrivalsPage() {
                     </p>
                 </div>
 
-                {products.length > 0 ? (
+                {loading ? (
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+                        {Array.from({ length: 8 }).map((_, i) => (
+                            <div key={i} className="rounded-[2rem] aspect-[3/4] animate-pulse" style={{ backgroundColor: 'var(--gray-100)' }} />
+                        ))}
+                    </div>
+                ) : products.length > 0 ? (
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
                         {products.map((product, i) => (
                             <div key={product.id} className="animate-fade-in" style={{ animationDelay: `${i * 80}ms` }}>

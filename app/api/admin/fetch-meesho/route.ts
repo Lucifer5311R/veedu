@@ -93,6 +93,17 @@ async function fetchViaMobileHttp(url: string): Promise<MeeshoProductData | null
 
         const html = await res.text();
 
+        // Detect Akamai bot challenge — returns 200 but serves a challenge page, not the product
+        if (
+            html.includes('sec-if-cpt-container') ||
+            html.includes('akamai') && html.includes('behavioral') ||
+            html.includes('Access Denied') ||
+            html.length < 5000  // actual product page is >50KB
+        ) {
+            console.warn('[Meesho/HTTP] Akamai block detected');
+            return null;
+        }
+
         // ── Path 1: Extract from embedded __NEXT_DATA__ JSON ──────────────────
         const nextDataMatch = html.match(
             /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/
@@ -326,6 +337,14 @@ export async function POST(req: NextRequest) {
         let productData = await fetchViaMobileHttp(url);
 
         if (!productData) {
+            // On Vercel, Playwright cannot run (50MB lambda limit) — skip it and
+            // immediately return 503 so the UI shows the bookmarklet fallback.
+            if (process.env.VERCEL) {
+                return NextResponse.json(
+                    { error: 'Browser scraping is not available in this environment. Use the bookmarklet fallback instead.' },
+                    { status: 503 }
+                );
+            }
             console.log('[Meesho] HTTP approach failed, trying Playwright...');
             productData = await fetchViaPlaywright(url);
         }

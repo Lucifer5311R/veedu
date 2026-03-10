@@ -1,14 +1,11 @@
 'use client';
 
-import React, { useState, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
 import ProductCard from '@/components/ProductCard';
-import productsData from '@/data/products.json';
 import { Product } from '@/lib/types';
-
-const products: Product[] = productsData as Product[];
 
 const categories = ['All Items', 'Kitchen', 'Laundry', 'Home & Bath', 'Organization'];
 
@@ -16,9 +13,18 @@ function ProductsSection() {
   const searchParams = useSearchParams();
   const searchQuery = searchParams.get('search') || '';
   const [activeCategory, setActiveCategory] = useState('All Items');
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/products')
+      .then(r => r.json())
+      .then(data => setProducts(Array.isArray(data) ? data : []))
+      .catch(() => setProducts([]))
+      .finally(() => setLoading(false));
+  }, []);
 
   const filteredProducts = products.filter(p => {
-    if (p.status !== 'published') return false;
     if (activeCategory !== 'All Items' && p.category !== activeCategory) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -62,15 +68,23 @@ function ProductsSection() {
       )}
 
       {/* Product Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
-        {filteredProducts.map((product, index) => (
-          <div key={product.id} className="animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
-            <ProductCard product={product} />
-          </div>
-        ))}
-      </div>
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="rounded-[2rem] aspect-[3/4] animate-pulse" style={{ backgroundColor: 'var(--gray-100)' }} />
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-6">
+          {filteredProducts.map((product, index) => (
+            <div key={product.id} className="animate-fade-in" style={{ animationDelay: `${index * 100}ms` }}>
+              <ProductCard product={product} />
+            </div>
+          ))}
+        </div>
+      )}
 
-      {filteredProducts.length === 0 && (
+      {!loading && filteredProducts.length === 0 && (
         <div className="text-center py-20">
           <p className="text-lg font-medium mb-2" style={{ color: 'var(--gray-400)' }}>
             {searchQuery ? `No results for "${searchQuery}"` : 'No products in this category yet.'}
