@@ -291,6 +291,17 @@ async function fetchViaPlaywright(url: string): Promise<MeeshoProductData | null
         if (!title || !price) return null;
         return { title, price, images: cleanImages(rawImages), description };
     } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Re-throw so the outer handler can return 503 "browser not available"
+        if (
+            msg.includes('executable') ||
+            msg.includes('chromium') ||
+            msg.includes('ENOENT') ||
+            msg.includes('browserType') ||
+            msg.includes('spawn')
+        ) {
+            throw err;
+        }
         console.error('[Meesho/PW] error:', err);
         return null;
     } finally {
