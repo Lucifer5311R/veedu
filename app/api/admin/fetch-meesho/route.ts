@@ -3,15 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { auth } from '@/auth';
 import { Product } from '@/lib/types';
+
+// playwright-extra wraps playwright/playwright-core and applies stealth plugin
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { chromium } = require('playwright-extra');
+const { addExtra } = require('playwright-extra');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
-
-// Guard against double-registration on HMR reloads — playwright-extra throws if same plugin type is added twice
-try {
-    chromium.use(StealthPlugin());
-} catch { /* already registered */ }
 
 const DATA_FILE = path.join(process.cwd(), 'data', 'products.json');
 const useSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
@@ -197,20 +194,46 @@ async function fetchViaMobileHttp(url: string): Promise<MeeshoProductData | null
 
 /**
  * FALLBACK: Playwright + stealth headless browser.
- * Used only when the lightweight HTTP approach fails (e.g. Akamai challenge returned).
+ * On Vercel: uses @sparticuz/chromium (minimal binary fetched at runtime).
+ * Locally: uses the bundled playwright chromium.
  */
 async function fetchViaPlaywright(url: string): Promise<MeeshoProductData | null> {
     let browser = null;
     try {
-        browser = await chromium.launch({
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-blink-features=AutomationControlled',
-            ],
-        });
+        let chromiumInstance;
+        let launchOptions: Record<string, unknown>;
+
+        if (process.env.VERCEL) {
+            // On Vercel: use playwright-core + @sparticuz/chromium
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { chromium: playwrightCore } = require('playwright-core');
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const sparticuz = require('@sparticuz/chromium');
+            chromiumInstance = addExtra(playwrightCore);
+            chromiumInstance.use(StealthPlugin());
+            launchOptions = {
+                args: sparticuz.args,
+                executablePath: await sparticuz.executablePath(),
+                headless: true,
+            };
+        } else {
+            // Locally: use playwright-extra with bundled playwright chromium
+            // eslint-disable-next-line @typescript-eslint/no-require-imports
+            const { chromium: playwrightChromium } = require('playwright');
+            chromiumInstance = addExtra(playwrightChromium);
+            try { chromiumInstance.use(StealthPlugin()); } catch { /* already registered */ }
+            launchOptions = {
+                headless: true,
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-blink-features=AutomationControlled',
+                ],
+            };
+        }
+
+        browser = await chromiumInstance.launch(launchOptions);
 
         const context = await browser.newContext({
             userAgent:
@@ -337,14 +360,6 @@ export async function POST(req: NextRequest) {
         let productData = await fetchViaMobileHttp(url);
 
         if (!productData) {
-            // On Vercel, Playwright cannot run (50MB lambda limit) — skip it and
-            // immediately return 503 so the UI shows the bookmarklet fallback.
-            if (process.env.VERCEL) {
-                return NextResponse.json(
-                    { error: 'Browser scraping is not available in this environment. Use the bookmarklet fallback instead.' },
-                    { status: 503 }
-                );
-            }
             console.log('[Meesho] HTTP approach failed, trying Playwright...');
             productData = await fetchViaPlaywright(url);
         }

@@ -7,6 +7,7 @@ const nextConfig: NextConfig = {
     'playwright-extra',
     'puppeteer-extra-plugin-stealth',
     'puppeteer-extra',
+    '@sparticuz/chromium',
   ],
   images: {
     remotePatterns: [
