@@ -193,9 +193,10 @@ async function fetchViaMobileHttp(url: string): Promise<MeeshoProductData | null
 }
 
 /**
- * FALLBACK: Playwright + stealth headless browser.
- * On Vercel: uses @sparticuz/chromium (minimal binary fetched at runtime).
- * Locally: uses the bundled playwright chromium.
+ * FALLBACK: Playwright headless browser.
+ * On Vercel: uses playwright-core + @sparticuz/chromium (no stealth plugin —
+ *   avoids the is-plain-object CJS/ESM incompatibility in that dep chain).
+ * Locally: uses playwright-extra + stealth with bundled chromium.
  */
 async function fetchViaPlaywright(url: string): Promise<MeeshoProductData | null> {
     let browser = null;
@@ -204,20 +205,19 @@ async function fetchViaPlaywright(url: string): Promise<MeeshoProductData | null
         let launchOptions: Record<string, unknown>;
 
         if (process.env.VERCEL) {
-            // On Vercel: use playwright-core + @sparticuz/chromium
+            // On Vercel: plain playwright-core — no stealth plugin (avoids ESM dep issue)
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             const { chromium: playwrightCore } = require('playwright-core');
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             const sparticuz = require('@sparticuz/chromium');
-            chromiumInstance = addExtra(playwrightCore);
-            chromiumInstance.use(StealthPlugin());
+            chromiumInstance = playwrightCore;
             launchOptions = {
-                args: sparticuz.args,
+                args: [...sparticuz.args, '--disable-blink-features=AutomationControlled'],
                 executablePath: await sparticuz.executablePath(),
-                headless: true,
+                headless: sparticuz.headless,
             };
         } else {
-            // Locally: use playwright-extra with bundled playwright chromium
+            // Locally: playwright-extra + stealth with bundled playwright chromium
             // eslint-disable-next-line @typescript-eslint/no-require-imports
             const { chromium: playwrightChromium } = require('playwright');
             chromiumInstance = addExtra(playwrightChromium);
