@@ -78,7 +78,6 @@ export default function AdminPage() {
     const [importLoading, setImportLoading] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
     const [importSuccess, setImportSuccess] = useState(false);
-    const [showBookmarkletFallback, setShowBookmarkletFallback] = useState(false);
     const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Load staged products from API on mount
@@ -195,7 +194,6 @@ export default function AdminPage() {
         setImportLoading(true);
         setImportError(null);
         setImportSuccess(false);
-        setShowBookmarkletFallback(false);
         try {
             const res = await fetch('/api/admin/fetch-meesho', {
                 method: 'POST',
@@ -210,11 +208,9 @@ export default function AdminPage() {
                 setTimeout(() => setImportSuccess(false), 4000);
             } else {
                 setImportError(data.error || 'Failed to import product');
-                setShowBookmarkletFallback(true);
             }
         } catch {
             setImportError('Network error. Please try again.');
-            setShowBookmarkletFallback(true);
         } finally {
             setImportLoading(false);
         }
@@ -236,7 +232,6 @@ export default function AdminPage() {
                     if (latest.length > stagedProducts.length) {
                         setStagedProducts(latest);
                         setImportUrl('');
-                        setShowBookmarkletFallback(false);
                         setImportSuccess(true);
                         setTimeout(() => setImportSuccess(false), 4000);
                         if (pollRef.current) clearInterval(pollRef.current);
@@ -347,70 +342,72 @@ export default function AdminPage() {
                             </div>
 
                             <div className="flex-1 w-full sm:max-w-lg bg-white p-4 rounded-3xl shadow-[var(--shadow-sm)] border">
-                                <p className="text-xs font-bold text-[var(--gray-500)] mb-3">
-                                    Paste a Meesho product link to import:
+                                {/* Step 1: Drag bookmarklet */}
+                                <p className="text-xs font-bold mb-1" style={{ color: 'var(--gray-500)' }}>
+                                    📦 Import from Meesho
                                 </p>
+                                <div className="flex items-start gap-3 p-3 rounded-2xl mb-3" style={{ backgroundColor: '#F0FAF4', border: '1px solid #C6E8D1' }}>
+                                    <div className="flex-1 text-xs" style={{ color: 'var(--gray-600)' }}>
+                                        <span className="font-bold" style={{ color: 'var(--green)' }}>Step 1</span> — drag this to your bookmarks bar <span className="opacity-60">(one-time setup)</span>
+                                    </div>
+                                    <a
+                                        href={BOOKMARKLET_CODE}
+                                        draggable
+                                        className="shrink-0 px-4 py-2 rounded-full text-xs font-bold text-white cursor-grab active:cursor-grabbing select-none"
+                                        style={{ backgroundColor: 'var(--green)', whiteSpace: 'nowrap' }}
+                                        onClick={e => { e.preventDefault(); alert('Drag this button to your browser\'s bookmarks bar first, then click it on any Meesho product page.'); }}
+                                    >
+                                        🔖 Veedu Importer ✦
+                                    </a>
+                                </div>
+
+                                {/* Step 2: paste URL + open */}
+                                <div className="text-xs mb-2" style={{ color: 'var(--gray-500)' }}>
+                                    <span className="font-bold" style={{ color: 'var(--accent)' }}>Step 2</span> — paste a Meesho product URL and open it:
+                                </div>
                                 <div className="flex gap-2">
                                     <input
                                         type="url"
                                         placeholder="https://meesho.com/product/..."
                                         value={importUrl}
-                                        onChange={e => { setImportUrl(e.target.value); setImportError(null); setShowBookmarkletFallback(false); }}
-                                        onKeyDown={e => e.key === 'Enter' && handleImport()}
+                                        onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
+                                        onKeyDown={e => e.key === 'Enter' && handleOpenAndPoll()}
                                         className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
                                         style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
                                         disabled={importLoading}
                                     />
                                     <button
-                                        onClick={handleImport}
-                                        disabled={importLoading || !importUrl.trim()}
+                                        onClick={handleOpenAndPoll}
+                                        disabled={!importUrl.trim()}
                                         className="px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        style={{ backgroundColor: 'var(--green)' }}
+                                        style={{ backgroundColor: 'var(--accent)' }}
                                     >
-                                        {importLoading ? '⏳' : 'Import'}
+                                        Open ↗
                                     </button>
                                 </div>
-                                {importLoading && (
-                                    <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>
-                                        Fetching product… this can take 20–30s
-                                    </p>
-                                )}
-                                {importError && !showBookmarkletFallback && (
-                                    <p className="text-xs mt-2 font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
-                                )}
+
+                                <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>
+                                    <span className="font-semibold" style={{ color: 'var(--green)' }}>Step 3</span> — on the Meesho page, click <strong>Veedu Importer ✦</strong> in your bookmarks. This page auto-updates.
+                                </p>
+
                                 {importSuccess && (
                                     <p className="text-xs mt-2 font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>
                                 )}
-
-                                {/* Fallback: open page + bookmarklet when server scrape is blocked */}
-                                {showBookmarkletFallback && (
-                                    <div className="mt-3 p-3 rounded-2xl" style={{ backgroundColor: '#FFF8F3', border: '1px solid #FFE8D6' }}>
-                                        <p className="text-xs font-bold mb-2" style={{ color: 'var(--accent)' }}>
-                                            Auto-import blocked — use the bookmarklet instead:
-                                        </p>
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <button
-                                                onClick={handleOpenAndPoll}
-                                                disabled={!importUrl.trim()}
-                                                className="px-4 py-2 rounded-full text-xs font-bold text-white transition-all hover:scale-105 disabled:opacity-50"
-                                                style={{ backgroundColor: 'var(--accent)' }}
-                                            >
-                                                1. Open in Meesho ↗
-                                            </button>
-                                            <a
-                                                href={BOOKMARKLET_CODE}
-                                                className="px-4 py-2 rounded-full text-xs font-bold transition-all hover:scale-105 cursor-grab"
-                                                style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
-                                                onClick={e => { e.preventDefault(); alert("Drag this button to your browser's bookmarks bar first, then click it on the opened Meesho page."); }}
-                                            >
-                                                2. Drag bookmarklet ✦
-                                            </a>
-                                        </div>
-                                        <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>
-                                            This page will auto-update when you click the bookmarklet on the product page.
-                                        </p>
-                                    </div>
+                                {importError && (
+                                    <p className="text-xs mt-2 font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
                                 )}
+
+                                {/* Auto-import as secondary option */}
+                                <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--gray-100)' }}>
+                                    <button
+                                        onClick={handleImport}
+                                        disabled={importLoading || !importUrl.trim()}
+                                        className="text-xs font-medium transition-all hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
+                                        style={{ color: 'var(--gray-400)' }}
+                                    >
+                                        {importLoading ? '⏳ Trying auto-import…' : 'Or try auto-import (may be blocked by Meesho)'}
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
