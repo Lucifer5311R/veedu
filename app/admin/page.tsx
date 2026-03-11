@@ -63,6 +63,84 @@ function SidebarIcon({ type }: { type: string }) {
     }
 }
 
+/** Parse Meesho product HTML in the browser using DOMParser — no server needed */
+function extractMeeshoProduct(html: string, sourceUrl: string): { url: string; title: string; price: number; images: string[] } | null {
+    if (!html || html.includes('Access Denied') || html.length < 5000) return null;
+
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+
+    // ── Title: __NEXT_DATA__ → JSON-LD → og:title → h1 ───────────────────
+    let title = '';
+    let price = 0;
+    let images: string[] = [];
+    let description = '';
+
+    // Try __NEXT_DATA__ first (most complete)
+    const nextScript = doc.querySelector('script#__NEXT_DATA__');
+    if (nextScript?.textContent) {
+        try {
+            const nd = JSON.parse(nextScript.textContent);
+            const pp = nd?.props?.pageProps;
+            const pd = pp?.product || pp?.productData || pp?.data?.product || pp?.catalogData?.product;
+            if (pd) {
+                title = pd.name || pd.title || '';
+                price = parseInt(String(pd.mrp || pd.price || pd.cost || 0), 10);
+                description = pd.description || pd.details || '';
+                images = (pd.images || []).map((img: { url?: string; src?: string } | string) =>
+                    typeof img === 'string' ? img : img.url || img.src || ''
+                );
+            }
+        } catch { /* skip */ }
+    }
+
+    // JSON-LD fallback
+    if (!title || !price) {
+        doc.querySelectorAll('script[type="application/ld+json"]').forEach(s => {
+            if (title && price) return;
+            try {
+                const ld = JSON.parse(s.textContent || '');
+                if (ld?.name && (ld?.offers?.price || ld?.price)) {
+                    title = ld.name;
+                    price = parseInt(String(ld.offers?.price || ld.price), 10);
+                    description = ld.description || '';
+                    const ldImg = ld.image;
+                    if (ldImg) images = Array.isArray(ldImg) ? ldImg : [ldImg];
+                }
+            } catch { /* skip */ }
+        });
+    }
+
+    // og:title + ₹ price fallback
+    if (!title) {
+        title = (doc.querySelector('meta[property="og:title"]') as HTMLMetaElement)?.content
+            ?.replace(/\s*[-|–]\s*meesho.*/i, '').trim() || '';
+    }
+    if (!price) {
+        const bodyText = doc.body?.innerText || html;
+        const m = bodyText.match(/₹\s*([0-9,]+)/);
+        if (m) price = parseInt(m[1].replace(/,/g, ''), 10);
+    }
+
+    // Images from CDN img tags
+    if (images.length === 0) {
+        doc.querySelectorAll<HTMLImageElement>('img[src*="images.meesho.com/images/products"]').forEach(img => {
+            if (!img.src.includes('profile')) images.push(img.src);
+        });
+    }
+    // Also scrape CDN URLs from raw HTML text
+    const cdnMatches = [...html.matchAll(/images\.meesho\.com\/images\/products\/[^"'\s\\]+/g)];
+    cdnMatches.forEach(m => { if (!m[0].includes('profile')) images.push(`https://${m[0]}`); });
+
+    // Upgrade to 1024px and deduplicate
+    images = Array.from(new Set(
+        images.map(u => (u.startsWith('http') ? u : `https://${u}`)
+            .replace(/_([\d]+)\.(jpg|jpeg|webp|png)(\?.*)?$/i, '_1024.$2$3'))
+    )).slice(0, 6);
+
+    if (!title || !price) return null;
+    return { url: sourceUrl, title, price, images };
+}
+
 export default function AdminPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [stagedProducts, setStagedProducts] = useState<Product[]>([]);
@@ -194,11 +272,51 @@ export default function AdminPage() {
         setImportLoading(true);
         setImportError(null);
         setImportSuccess(false);
+
+        const url = importUrl.trim();
+
+        // ── Approach 1: Browser-side fetch via CF Worker ──────────────────────
+        // Browser IP is never blocked; CF Worker adds CORS headers so browser can read HTML.
+        const cfProxyUrl = process.env.NEXT_PUBLIC_CF_PROXY_URL;
+        const cfSecret   = process.env.NEXT_PUBLIC_CF_PROXY_SECRET;
+
+        if (cfProxyUrl && cfSecret) {
+            try {
+                const proxyRes = await fetch(cfProxyUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfSecret}` },
+                    body: JSON.stringify({ url }),
+                });
+
+                if (proxyRes.ok) {
+                    const html = await proxyRes.text();
+                    const product = extractMeeshoProduct(html, url);
+                    if (product) {
+                        const saveRes = await fetch('/api/admin/scrape-meesho', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(product),
+                        });
+                        const saved = await saveRes.json();
+                        if (saveRes.ok && saved.success) {
+                            setStagedProducts(prev => [...prev, saved.product]);
+                            setImportUrl('');
+                            setImportSuccess(true);
+                            setTimeout(() => setImportSuccess(false), 4000);
+                            setImportLoading(false);
+                            return;
+                        }
+                    }
+                }
+            } catch { /* fall through to server-side */ }
+        }
+
+        // ── Approach 2: Server-side fetch (may be blocked on Vercel) ─────────
         try {
             const res = await fetch('/api/admin/fetch-meesho', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: importUrl.trim() }),
+                body: JSON.stringify({ url }),
             });
             const data = await res.json();
             if (res.ok && data.success) {
