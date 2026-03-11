@@ -58,34 +58,37 @@ function cleanImages(urls: string[]): string[] {
 }
 
 /**
- * APPROACH 1: ScraperAPI — routes through residential/mobile IPs, bypasses Akamai.
- * Only used when SCRAPER_API_KEY env var is set (free tier: 1000 req/month).
- * Sign up free at https://www.scraperapi.com/
+ * APPROACH 1: Our own Cloudflare Worker proxy.
+ * Fetches from Cloudflare's network (different IPs, not blocked by Meesho/Akamai).
+ * Set CF_PROXY_URL + CF_PROXY_SECRET in Vercel env vars.
+ * Worker code lives in cf-worker/worker.js — deploy once to Cloudflare for free.
  */
-async function fetchViaScraperApi(url: string): Promise<MeeshoProductData | null> {
-    const apiKey = process.env.SCRAPER_API_KEY;
-    if (!apiKey) return null;
+async function fetchViaCloudflareProxy(url: string): Promise<MeeshoProductData | null> {
+    const proxyUrl = process.env.CF_PROXY_URL;
+    const proxySecret = process.env.CF_PROXY_SECRET;
+    if (!proxyUrl || !proxySecret) return null;
 
     try {
-        const proxyUrl = `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=in&keep_headers=true`;
         const res = await fetch(proxyUrl, {
+            method: 'POST',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-                'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${proxySecret}`,
             },
-            signal: AbortSignal.timeout(30000),
+            body: JSON.stringify({ url }),
+            signal: AbortSignal.timeout(20000),
         });
 
         if (!res.ok) {
-            console.warn('[Meesho/ScraperAPI] Response not OK:', res.status);
+            console.warn('[Meesho/CF] Proxy returned:', res.status);
             return null;
         }
 
         const html = await res.text();
-        console.log('[Meesho/ScraperAPI] Got HTML len:', html.length);
+        console.log('[Meesho/CF] Got HTML len:', html.length, 'from:', res.headers.get('X-Proxy-Source'));
         return extractFromHtml(html);
     } catch (err) {
-        console.warn('[Meesho/ScraperAPI] failed:', err);
+        console.warn('[Meesho/CF] failed:', err);
         return null;
     }
 }
@@ -369,8 +372,8 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        // Try ScraperAPI first (if key set) — routes through residential IPs, bypasses Akamai
-        let productData = await fetchViaScraperApi(url);
+        // Try our Cloudflare Worker proxy first (set CF_PROXY_URL + CF_PROXY_SECRET in Vercel)
+        let productData = await fetchViaCloudflareProxy(url);
 
         if (!productData) {
             console.log('[Meesho] Trying direct HTTP (no-www + www)...');
