@@ -58,234 +58,151 @@ function cleanImages(urls: string[]): string[] {
 }
 
 /**
- * APPROACH 1: Meesho's internal mobile proapi (used by the Android app).
- * proapi.meesho.com uses lighter bot-protection than www.meesho.com / Akamai.
- * Catalog ID is extracted from the URL slug (e.g. /p/cdub3l → "cdub3l").
+ * APPROACH 1: ScraperAPI — routes through residential/mobile IPs, bypasses Akamai.
+ * Only used when SCRAPER_API_KEY env var is set (free tier: 1000 req/month).
+ * Sign up free at https://www.scraperapi.com/
  */
-async function fetchViaMeeshoApi(url: string): Promise<MeeshoProductData | null> {
-    const catalogMatch = url.match(/\/p\/([a-zA-Z0-9]+)\/?(\?.*)?$/);
-    if (!catalogMatch) return null;
+async function fetchViaScraperApi(url: string): Promise<MeeshoProductData | null> {
+    const apiKey = process.env.SCRAPER_API_KEY;
+    if (!apiKey) return null;
 
-    const catalogId = catalogMatch[1];
-
-    // Try several known proapi endpoints in order
-    const endpoints: Array<{ method: string; url: string; body?: string }> = [
-        {
-            method: 'POST',
-            url: 'https://proapi.meesho.com/proto/v1/catalog_product/get_catalog',
-            body: JSON.stringify({ catalog_id: catalogId }),
-        },
-        {
-            method: 'POST',
-            url: 'https://proapi.meesho.com/v3/listing/catalogs',
-            body: JSON.stringify({ catalog_ids: [catalogId] }),
-        },
-        {
-            method: 'GET',
-            url: `https://proapi.meesho.com/v2/catalogs/${catalogId}`,
-        },
-    ];
-
-    const appHeaders: Record<string, string> = {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-        'User-Agent': 'okhttp/4.9.3',
-        'x-meesho-client': 'android',
-        'x-meesho-os-version': '33',
-        'x-meesho-app-version-code': '210000',
-        'x-meesho-req-id': crypto.randomUUID(),
-        'x-meesho-network-type': 'wifi',
-    };
-
-    for (const ep of endpoints) {
-        try {
-            const res = await fetch(ep.url, {
-                method: ep.method,
-                headers: appHeaders,
-                body: ep.body,
-                signal: AbortSignal.timeout(10000),
-            });
-
-            if (!res.ok) {
-                console.warn(`[Meesho/API] ${ep.url} → ${res.status}`);
-                continue;
-            }
-
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const data: any = await res.json();
-            console.log('[Meesho/API] raw response keys:', Object.keys(data));
-
-            // Handle various response shapes
-            const catalog =
-                data?.catalog ||
-                data?.catalogs?.[0] ||
-                data?.product ||
-                data?.data?.catalog ||
-                data?.data?.product;
-
-            if (!catalog) continue;
-
-            const title: string = catalog.name || catalog.title || catalog.catalog_name || '';
-            const price: number = parseInt(
-                String(catalog.mrp || catalog.cost || catalog.min_price || catalog.price || 0),
-                10
-            );
-            if (!title || !price) continue;
-
-            const rawImages: string[] = (
-                catalog.images ||
-                catalog.catalog_images ||
-                catalog.media ||
-                []
-            ).map((img: { url?: string; src?: string; image_url?: string } | string) =>
-                typeof img === 'string' ? img : img.url || img.src || img.image_url || ''
-            );
-
-            const description: string =
-                catalog.description || catalog.details || catalog.catalog_description || '';
-
-            console.log('[Meesho/API] Got product:', title, price);
-            return { title, price, images: cleanImages(rawImages), description };
-        } catch (err) {
-            console.warn(`[Meesho/API] ${ep.url} failed:`, err);
-        }
-    }
-    return null;
-}
-
-/**
- * APPROACH 2: Fetch via plain HTTP with mobile User-Agent.
- * Meesho is a Next.js app — product data is embedded in __NEXT_DATA__ JSON
- * in the raw HTML, no JavaScript execution needed.
- * Mobile UA is lighter-weight and less likely to trigger Akamai's bot challenge.
- */
-async function fetchViaMobileHttp(url: string): Promise<MeeshoProductData | null> {
     try {
-        const res = await fetch(url, {
+        const proxyUrl = `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&country_code=in&keep_headers=true`;
+        const res = await fetch(proxyUrl, {
             headers: {
-                'User-Agent':
-                    'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-                Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
                 'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                Referer: 'https://www.meesho.com/',
-                'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="124"',
-                'sec-ch-ua-mobile': '?1',
-                'sec-ch-ua-platform': '"Android"',
-                'Upgrade-Insecure-Requests': '1',
-                'Cache-Control': 'no-cache',
             },
-            // 15s timeout via AbortController
-            signal: AbortSignal.timeout(15000),
+            signal: AbortSignal.timeout(30000),
         });
 
         if (!res.ok) {
-            console.warn('[Meesho/HTTP] Response not OK:', res.status);
+            console.warn('[Meesho/ScraperAPI] Response not OK:', res.status);
             return null;
         }
 
         const html = await res.text();
-
-        // Detect Akamai bot challenge — returns 200 but serves a challenge page, not the product
-        if (
-            html.includes('sec-if-cpt-container') ||
-            html.includes('akamai') && html.includes('behavioral') ||
-            html.includes('Access Denied') ||
-            html.length < 5000  // actual product page is >50KB
-        ) {
-            console.warn('[Meesho/HTTP] Akamai block detected');
-            return null;
-        }
-
-        // ── Path 1: Extract from embedded __NEXT_DATA__ JSON ──────────────────
-        const nextDataMatch = html.match(
-            /<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/
-        );
-        if (nextDataMatch) {
-            try {
-                const nextData = JSON.parse(nextDataMatch[1]);
-                const pageProps = nextData?.props?.pageProps;
-                // Meesho nests product data differently across versions — try known paths
-                const productData =
-                    pageProps?.product ||
-                    pageProps?.productData ||
-                    pageProps?.data?.product ||
-                    pageProps?.catalogData?.product;
-
-                if (productData) {
-                    const title: string = productData.name || productData.title || '';
-                    const price: number = parseInt(
-                        String(productData.mrp || productData.price || productData.cost || 0),
-                        10
-                    );
-                    const rawImages: string[] = (productData.images || []).map(
-                        (img: { url?: string; src?: string } | string) =>
-                            typeof img === 'string' ? img : img.url || img.src || ''
-                    );
-                    const description: string =
-                        productData.description || productData.details || '';
-                    if (title && price) {
-                        console.log('[Meesho/HTTP] Got data from __NEXT_DATA__:', title, price);
-                        return { title, price, images: cleanImages(rawImages), description };
-                    }
-                }
-            } catch (e) {
-                console.warn('[Meesho/HTTP] __NEXT_DATA__ parse failed:', e);
-            }
-        }
-
-        // ── Path 2: JSON-LD structured data ───────────────────────────────────
-        const ldMatches = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
-        for (const match of ldMatches) {
-            try {
-                const ld = JSON.parse(match[1]);
-                const ldPrice = ld?.offers?.price || ld?.price;
-                const ldTitle = ld?.name || ld?.title || '';
-                const ldDesc = ld?.description || '';
-                if (ldTitle && ldPrice) {
-                    const ldImageRaw = ld?.image || [];
-                    const ldImages = Array.isArray(ldImageRaw) ? ldImageRaw : [ldImageRaw];
-                    // Also scan for CDN images in HTML
-                    const cdnImages = [...html.matchAll(/images\.meesho\.com\/images\/products\/[^"'\s\\]+/g)].map(
-                        (m) => `https://${m[0]}`
-                    );
-                    console.log('[Meesho/HTTP] Got data from JSON-LD:', ldTitle, ldPrice);
-                    return {
-                        title: ldTitle,
-                        price: parseInt(String(ldPrice), 10),
-                        images: cleanImages([...ldImages, ...cdnImages]),
-                        description: ldDesc,
-                    };
-                }
-            } catch { /* skip malformed JSON-LD */ }
-        }
-
-        // ── Path 3: og:title + ₹ price from raw HTML ─────────────────────────
-        const ogTitle = html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/)?.[1]
-            ?.replace(/\s*[-|–]\s*meesho.*/i, '')
-            .trim();
-        const ogDesc = html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/)?.[1]?.trim();
-        const priceMatch = html.match(/₹\s*([0-9,]+)/);
-        const cdnImages = [...html.matchAll(/images\.meesho\.com\/images\/products\/[^"'\s\\]+/g)].map(
-            (m) => `https://${m[0]}`
-        );
-
-        if (ogTitle && priceMatch) {
-            console.log('[Meesho/HTTP] Got data from og:meta:', ogTitle, priceMatch[1]);
-            return {
-                title: ogTitle,
-                price: parseInt(priceMatch[1].replace(/,/g, ''), 10),
-                images: cleanImages(cdnImages),
-                description: ogDesc || '',
-            };
-        }
-
-        console.warn('[Meesho/HTTP] Could not extract product data from HTML');
-        return null;
+        console.log('[Meesho/ScraperAPI] Got HTML len:', html.length);
+        return extractFromHtml(html);
     } catch (err) {
-        console.warn('[Meesho/HTTP] fetch failed:', err);
+        console.warn('[Meesho/ScraperAPI] failed:', err);
         return null;
     }
+}
+
+/** Extract product data from Meesho HTML (shared by HTTP and ScraperAPI approaches) */
+function extractFromHtml(html: string): MeeshoProductData | null {
+    if (
+        html.includes('Access Denied') ||
+        html.includes('sec-if-cpt-container') ||
+        html.length < 5000
+    ) {
+        console.warn('[Meesho/HTML] Bot block detected, html len:', html.length);
+        return null;
+    }
+
+    // ── Path 1: __NEXT_DATA__ ──────────────────────────────────────────────
+    const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    if (nextDataMatch) {
+        try {
+            const nextData = JSON.parse(nextDataMatch[1]);
+            const pageProps = nextData?.props?.pageProps;
+            const productData =
+                pageProps?.product ||
+                pageProps?.productData ||
+                pageProps?.data?.product ||
+                pageProps?.catalogData?.product;
+
+            if (productData) {
+                const title: string = productData.name || productData.title || '';
+                const price: number = parseInt(String(productData.mrp || productData.price || productData.cost || 0), 10);
+                const rawImages: string[] = (productData.images || []).map(
+                    (img: { url?: string; src?: string } | string) =>
+                        typeof img === 'string' ? img : img.url || img.src || ''
+                );
+                const description: string = productData.description || productData.details || '';
+                if (title && price) {
+                    console.log('[Meesho/HTML] Got from __NEXT_DATA__:', title, price);
+                    return { title, price, images: cleanImages(rawImages), description };
+                }
+            }
+        } catch (e) {
+            console.warn('[Meesho/HTML] __NEXT_DATA__ parse failed:', e);
+        }
+    }
+
+    // ── Path 2: JSON-LD ────────────────────────────────────────────────────
+    const ldMatches = [...html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)];
+    for (const match of ldMatches) {
+        try {
+            const ld = JSON.parse(match[1]);
+            const ldPrice = ld?.offers?.price || ld?.price;
+            const ldTitle = ld?.name || ld?.title || '';
+            const ldDesc = ld?.description || '';
+            if (ldTitle && ldPrice) {
+                const ldImages = Array.isArray(ld?.image) ? ld.image : (ld?.image ? [ld.image] : []);
+                const cdnImages = [...html.matchAll(/images\.meesho\.com\/images\/products\/[^"'\s\\]+/g)].map(m => `https://${m[0]}`);
+                console.log('[Meesho/HTML] Got from JSON-LD:', ldTitle, ldPrice);
+                return { title: ldTitle, price: parseInt(String(ldPrice), 10), images: cleanImages([...ldImages, ...cdnImages]), description: ldDesc };
+            }
+        } catch { /* skip */ }
+    }
+
+    // ── Path 3: og:meta + ₹ price ─────────────────────────────────────────
+    const ogTitle = html.match(/<meta[^>]+property="og:title"[^>]+content="([^"]+)"/)?.[1]
+        ?.replace(/\s*[-|–]\s*meesho.*/i, '').trim();
+    const ogDesc = html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/)?.[1]?.trim();
+    const priceMatch = html.match(/₹\s*([0-9,]+)/);
+    const cdnImages = [...html.matchAll(/images\.meesho\.com\/images\/products\/[^"'\s\\]+/g)].map(m => `https://${m[0]}`);
+
+    if (ogTitle && priceMatch) {
+        console.log('[Meesho/HTML] Got from og:meta:', ogTitle, priceMatch[1]);
+        return { title: ogTitle, price: parseInt(priceMatch[1].replace(/,/g, ''), 10), images: cleanImages(cdnImages), description: ogDesc || '' };
+    }
+
+    console.warn('[Meesho/HTML] Could not extract product data');
+    return null;
+}
+
+/**
+ * APPROACH 2: Fetch via plain HTTP — tries no-www URL (different Akamai config)
+ * then falls back to www. Meesho product data is in __NEXT_DATA__ JSON in the HTML.
+ */
+async function fetchViaMobileHttp(url: string): Promise<MeeshoProductData | null> {
+    // Try without www first — may use different Akamai policy
+    const noWwwUrl = url.replace('://www.meesho.com/', '://meesho.com/');
+    const urlsToTry = noWwwUrl !== url ? [noWwwUrl, url] : [url];
+
+    const headers = {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-IN,en-US;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        Referer: 'https://meesho.com/',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="124"',
+        'sec-ch-ua-mobile': '?1',
+        'sec-ch-ua-platform': '"Android"',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'no-cache',
+    };
+
+    for (const fetchUrl of urlsToTry) {
+        try {
+            const res = await fetch(fetchUrl, { headers, signal: AbortSignal.timeout(15000) });
+
+            if (!res.ok) {
+                console.warn('[Meesho/HTTP]', fetchUrl, '→', res.status);
+                continue;
+            }
+
+            const html = await res.text();
+            const result = extractFromHtml(html);
+            if (result) return result;
+        } catch (err) {
+            console.warn('[Meesho/HTTP] fetch failed:', fetchUrl, err);
+        }
+    }
+    return null;
 }
 
 /**
@@ -452,16 +369,16 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        // Try Meesho's internal mobile API first (bypasses Akamai www-block)
-        let productData = await fetchViaMeeshoApi(url);
+        // Try ScraperAPI first (if key set) — routes through residential IPs, bypasses Akamai
+        let productData = await fetchViaScraperApi(url);
 
         if (!productData) {
-            console.log('[Meesho] API approach failed, trying HTTP...');
+            console.log('[Meesho] Trying direct HTTP (no-www + www)...');
             productData = await fetchViaMobileHttp(url);
         }
 
         if (!productData) {
-            console.log('[Meesho] HTTP approach failed, trying Playwright...');
+            console.log('[Meesho] HTTP failed, trying Playwright...');
             productData = await fetchViaPlaywright(url);
         }
 
