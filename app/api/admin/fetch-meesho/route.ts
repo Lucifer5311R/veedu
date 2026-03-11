@@ -58,7 +58,103 @@ function cleanImages(urls: string[]): string[] {
 }
 
 /**
- * PRIMARY: Fetch via plain HTTP with mobile User-Agent.
+ * APPROACH 1: Meesho's internal mobile proapi (used by the Android app).
+ * proapi.meesho.com uses lighter bot-protection than www.meesho.com / Akamai.
+ * Catalog ID is extracted from the URL slug (e.g. /p/cdub3l → "cdub3l").
+ */
+async function fetchViaMeeshoApi(url: string): Promise<MeeshoProductData | null> {
+    const catalogMatch = url.match(/\/p\/([a-zA-Z0-9]+)\/?(\?.*)?$/);
+    if (!catalogMatch) return null;
+
+    const catalogId = catalogMatch[1];
+
+    // Try several known proapi endpoints in order
+    const endpoints: Array<{ method: string; url: string; body?: string }> = [
+        {
+            method: 'POST',
+            url: 'https://proapi.meesho.com/proto/v1/catalog_product/get_catalog',
+            body: JSON.stringify({ catalog_id: catalogId }),
+        },
+        {
+            method: 'POST',
+            url: 'https://proapi.meesho.com/v3/listing/catalogs',
+            body: JSON.stringify({ catalog_ids: [catalogId] }),
+        },
+        {
+            method: 'GET',
+            url: `https://proapi.meesho.com/v2/catalogs/${catalogId}`,
+        },
+    ];
+
+    const appHeaders: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'okhttp/4.9.3',
+        'x-meesho-client': 'android',
+        'x-meesho-os-version': '33',
+        'x-meesho-app-version-code': '210000',
+        'x-meesho-req-id': crypto.randomUUID(),
+        'x-meesho-network-type': 'wifi',
+    };
+
+    for (const ep of endpoints) {
+        try {
+            const res = await fetch(ep.url, {
+                method: ep.method,
+                headers: appHeaders,
+                body: ep.body,
+                signal: AbortSignal.timeout(10000),
+            });
+
+            if (!res.ok) {
+                console.warn(`[Meesho/API] ${ep.url} → ${res.status}`);
+                continue;
+            }
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const data: any = await res.json();
+            console.log('[Meesho/API] raw response keys:', Object.keys(data));
+
+            // Handle various response shapes
+            const catalog =
+                data?.catalog ||
+                data?.catalogs?.[0] ||
+                data?.product ||
+                data?.data?.catalog ||
+                data?.data?.product;
+
+            if (!catalog) continue;
+
+            const title: string = catalog.name || catalog.title || catalog.catalog_name || '';
+            const price: number = parseInt(
+                String(catalog.mrp || catalog.cost || catalog.min_price || catalog.price || 0),
+                10
+            );
+            if (!title || !price) continue;
+
+            const rawImages: string[] = (
+                catalog.images ||
+                catalog.catalog_images ||
+                catalog.media ||
+                []
+            ).map((img: { url?: string; src?: string; image_url?: string } | string) =>
+                typeof img === 'string' ? img : img.url || img.src || img.image_url || ''
+            );
+
+            const description: string =
+                catalog.description || catalog.details || catalog.catalog_description || '';
+
+            console.log('[Meesho/API] Got product:', title, price);
+            return { title, price, images: cleanImages(rawImages), description };
+        } catch (err) {
+            console.warn(`[Meesho/API] ${ep.url} failed:`, err);
+        }
+    }
+    return null;
+}
+
+/**
+ * APPROACH 2: Fetch via plain HTTP with mobile User-Agent.
  * Meesho is a Next.js app — product data is embedded in __NEXT_DATA__ JSON
  * in the raw HTML, no JavaScript execution needed.
  * Mobile UA is lighter-weight and less likely to trigger Akamai's bot challenge.
@@ -356,8 +452,13 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        // Try lightweight HTTP approach first (no browser, harder to block)
-        let productData = await fetchViaMobileHttp(url);
+        // Try Meesho's internal mobile API first (bypasses Akamai www-block)
+        let productData = await fetchViaMeeshoApi(url);
+
+        if (!productData) {
+            console.log('[Meesho] API approach failed, trying HTTP...');
+            productData = await fetchViaMobileHttp(url);
+        }
 
         if (!productData) {
             console.log('[Meesho] HTTP approach failed, trying Playwright...');
