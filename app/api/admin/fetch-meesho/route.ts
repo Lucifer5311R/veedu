@@ -4,6 +4,8 @@ import path from 'path';
 import { auth } from '@/auth';
 import { Product } from '@/lib/types';
 
+export const maxDuration = 60; // seconds — needed for ScraperAPI which can take 30-50s
+
 // playwright-extra wraps playwright/playwright-core and applies stealth plugin
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { addExtra } = require('playwright-extra');
@@ -70,8 +72,8 @@ async function fetchViaScraperAPI(url: string): Promise<MeeshoProductData | null
 
     try {
         console.log('[Meesho/ScraperAPI] Trying with key:', apiKey.slice(0, 6) + '...');
-        const scraperUrl = `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&render=false`;
-        const res = await fetch(scraperUrl, { signal: AbortSignal.timeout(30000) });
+        const scraperUrl = `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&render=false&country_code=in`;
+        const res = await fetch(scraperUrl, { signal: AbortSignal.timeout(55000) });
         console.log('[Meesho/ScraperAPI] Response status:', res.status);
         if (!res.ok) {
             const body = await res.text().catch(() => '');
