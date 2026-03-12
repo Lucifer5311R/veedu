@@ -4,6 +4,8 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 import { useCart } from '@/context/CartProvider';
+import { useToast } from '@/context/ToastProvider';
+import { trackBeginCheckout, trackPurchase } from '@/lib/analytics';
 
 interface FormErrors {
     phone?: string;
@@ -12,7 +14,9 @@ interface FormErrors {
 
 export default function CheckoutPage() {
     const { items, total, itemCount, clearCart } = useCart();
+    const { showToast } = useToast();
     const [step, setStep] = useState<'address' | 'payment' | 'success'>('address');
+    const [orderId, setOrderId] = useState<string | null>(null);
     const [form, setForm] = useState({
         name: '',
         phone: '',
@@ -48,12 +52,34 @@ export default function CheckoutPage() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (validate()) setStep('payment');
+        if (validate()) {
+            trackBeginCheckout(total, itemCount);
+            setStep('payment');
+        }
     };
 
     const upiLink = `upi://pay?pa=veedu@upi&pn=Veedu%20Store&am=${total}&cu=INR&tn=VDU-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 
-    const handlePaymentDone = () => {
+    const handlePaymentDone = async () => {
+        try {
+            const res = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    items: items.map(i => ({ productId: i.product.id, title: i.product.title, price: i.product.sellingPrice, quantity: i.quantity, image: i.product.images?.[0] || '' })),
+                    total,
+                    customer: { name: form.name, phone: form.phone, address: form.address, city: form.city, pincode: form.pincode, state: 'Kerala' },
+                }),
+            });
+            if (res.ok) {
+                const order = await res.json();
+                setOrderId(order.id);
+                trackPurchase(order.id, total, items.map(i => ({ id: i.product.id, title: i.product.title, price: i.product.sellingPrice, quantity: i.quantity })));
+                showToast('Order placed successfully!');
+            }
+        } catch {
+            showToast('Order saved locally', 'info');
+        }
         clearCart();
         setStep('success');
     };
@@ -253,16 +279,30 @@ export default function CheckoutPage() {
                             </svg>
                         </div>
                         <h2 className="text-2xl font-bold mb-2" style={{ color: 'var(--foreground)' }}>Order Placed!</h2>
+                        {orderId && (
+                            <p className="text-sm font-mono mb-2 px-4 py-2 rounded-xl inline-block" style={{ backgroundColor: 'var(--gray-100)', color: 'var(--foreground)' }}>{orderId}</p>
+                        )}
                         <p className="text-sm mb-8" style={{ color: 'var(--gray-500)' }}>
                             Your order has been received. You&apos;ll get a WhatsApp confirmation shortly with tracking details.
                         </p>
-                        <Link
-                            href="/"
-                            className="inline-flex items-center gap-2 px-6 py-3 rounded-full text-sm font-semibold text-white"
-                            style={{ backgroundColor: 'var(--accent)' }}
-                        >
-                            Continue Shopping
-                        </Link>
+                        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                            {orderId && (
+                                <Link
+                                    href={`/orders/${orderId}`}
+                                    className="inline-flex items-center gap-2 px-6 py-3 rounded-full text-sm font-semibold"
+                                    style={{ color: 'var(--accent)', border: '1px solid var(--accent)' }}
+                                >
+                                    Track Order
+                                </Link>
+                            )}
+                            <Link
+                                href="/"
+                                className="inline-flex items-center gap-2 px-6 py-3 rounded-full text-sm font-semibold text-white"
+                                style={{ backgroundColor: 'var(--accent)' }}
+                            >
+                                Continue Shopping
+                            </Link>
+                        </div>
                     </div>
                 )}
             </div>

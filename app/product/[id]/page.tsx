@@ -3,17 +3,24 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Product } from '@/lib/types';
+import Image from 'next/image';
+import { Product, Review } from '@/lib/types';
 import { useCart } from '@/context/CartProvider';
 import { useWishlist } from '@/context/WishlistProvider';
+import { useToast } from '@/context/ToastProvider';
+import { trackViewItem } from '@/lib/analytics';
 import Navbar from '@/components/Navbar';
 import Footer from '@/components/Footer';
+import ShareButton from '@/components/ShareButton';
+import ImageZoom from '@/components/ImageZoom';
+import StarRating from '@/components/StarRating';
 
 export default function ProductDetailPage() {
     const { id } = useParams<{ id: string }>();
     const router = useRouter();
     const { addToCart } = useCart();
     const { toggleWishlist, isWishlisted } = useWishlist();
+    const { showToast } = useToast();
 
     const [product, setProduct] = useState<Product | null>(null);
     const [related, setRelated] = useState<Product[]>([]);
@@ -21,6 +28,11 @@ export default function ProductDetailPage() {
     const [selectedImage, setSelectedImage] = useState(0);
     const [quantity, setQuantity] = useState(1);
     const [addedToCart, setAddedToCart] = useState(false);
+    const [reviews, setReviews] = useState<Review[]>([]);
+    const [reviewForm, setReviewForm] = useState({ name: '', rating: 5, comment: '' });
+    const [reviewSubmitting, setReviewSubmitting] = useState(false);
+    const [reviewSubmitted, setReviewSubmitted] = useState(false);
+    const [activeTab, setActiveTab] = useState<'description' | 'reviews' | 'shipping'>('description');
 
     useEffect(() => {
         const load = async () => {
@@ -30,12 +42,18 @@ export default function ProductDetailPage() {
                 if (!res.ok) { router.push('/catalog'); return; }
                 const data: Product = await res.json();
                 setProduct(data);
+                trackViewItem({ id: data.id, title: data.title, price: data.sellingPrice, category: data.category });
 
-                // Fetch related products from same category
-                const allRes = await fetch('/api/products');
+                const [allRes, reviewsRes] = await Promise.all([
+                    fetch('/api/products'),
+                    fetch(`/api/reviews?productId=${data.id}`),
+                ]);
                 if (allRes.ok) {
                     const all: Product[] = await allRes.json();
                     setRelated(all.filter(p => p.category === data.category && p.id !== data.id).slice(0, 4));
+                }
+                if (reviewsRes.ok) {
+                    setReviews(await reviewsRes.json());
                 }
             } catch {
                 router.push('/catalog');
@@ -50,8 +68,35 @@ export default function ProductDetailPage() {
         if (!product) return;
         for (let i = 0; i < quantity; i++) addToCart(product);
         setAddedToCart(true);
+        showToast(`${product.title} added to cart!`);
         setTimeout(() => setAddedToCart(false), 2500);
     };
+
+    const handleReviewSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!product || !reviewForm.name.trim() || !reviewForm.comment.trim()) return;
+        setReviewSubmitting(true);
+        try {
+            const res = await fetch('/api/reviews', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ productId: product.id, ...reviewForm }),
+            });
+            if (res.ok) {
+                setReviewSubmitted(true);
+                setReviewForm({ name: '', rating: 5, comment: '' });
+                showToast('Review submitted! It will appear after approval.', 'info');
+            } else {
+                showToast('Failed to submit review', 'error');
+            }
+        } catch {
+            showToast('Failed to submit review', 'error');
+        } finally {
+            setReviewSubmitting(false);
+        }
+    };
+
+    const avgRating = reviews.length > 0 ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : 0;
 
     if (loading) {
         return (
@@ -95,16 +140,16 @@ export default function ProductDetailPage() {
 
                         {/* Image Gallery */}
                         <div>
-                            {/* Main Image */}
-                            <div className="relative aspect-square rounded-[2.5rem] overflow-hidden mb-4" style={{ backgroundColor: '#F3F4F3' }}>
+                            {/* Main Image with Zoom */}
+                            <div className="relative rounded-[2.5rem] overflow-hidden mb-4" style={{ backgroundColor: '#F3F4F3' }}>
                                 {product.images?.[selectedImage] ? (
-                                    <img
+                                    <ImageZoom
                                         src={product.images[selectedImage]}
                                         alt={product.title}
-                                        className="w-full h-full object-cover"
+                                        className="aspect-square"
                                     />
                                 ) : (
-                                    <div className="w-full h-full flex items-center justify-center">
+                                    <div className="aspect-square w-full flex items-center justify-center">
                                         <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="var(--gray-300)" strokeWidth="1">
                                             <rect x="3" y="3" width="18" height="18" rx="2" /><circle cx="8.5" cy="8.5" r="1.5" /><polyline points="21 15 16 10 5 21" />
                                         </svg>
@@ -112,8 +157,8 @@ export default function ProductDetailPage() {
                                 )}
                                 {/* Wishlist */}
                                 <button
-                                    onClick={() => toggleWishlist(product)}
-                                    className="absolute top-5 right-5 w-11 h-11 rounded-full flex items-center justify-center transition-transform hover:scale-110"
+                                    onClick={() => { toggleWishlist(product); showToast(wishlisted ? 'Removed from wishlist' : 'Added to wishlist!'); }}
+                                    className="absolute top-5 right-5 z-10 w-11 h-11 rounded-full flex items-center justify-center transition-transform hover:scale-110"
                                     style={{ backgroundColor: 'var(--white)', boxShadow: 'var(--shadow-md)' }}
                                 >
                                     <svg width="18" height="18" viewBox="0 0 24 24"
@@ -123,6 +168,10 @@ export default function ProductDetailPage() {
                                         <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
                                     </svg>
                                 </button>
+                                {/* Share */}
+                                <div className="absolute top-5 left-5 z-10">
+                                    <ShareButton title={product.title} price={product.sellingPrice} />
+                                </div>
                             </div>
 
                             {/* Thumbnails */}
@@ -132,13 +181,13 @@ export default function ProductDetailPage() {
                                         <button
                                             key={i}
                                             onClick={() => setSelectedImage(i)}
-                                            className="flex-shrink-0 w-20 h-20 rounded-2xl overflow-hidden transition-all"
+                                            className="relative flex-shrink-0 w-20 h-20 rounded-2xl overflow-hidden transition-all"
                                             style={{
                                                 border: selectedImage === i ? '2px solid var(--green)' : '2px solid transparent',
                                                 backgroundColor: '#F3F4F3',
                                             }}
                                         >
-                                            <img src={img} alt={`${product.title} ${i + 1}`} className="w-full h-full object-cover" />
+                                            <Image src={img} alt={`${product.title} ${i + 1}`} fill sizes="80px" className="object-cover" />
                                         </button>
                                     ))}
                                 </div>
@@ -249,6 +298,111 @@ export default function ProductDetailPage() {
                         </div>
                     </div>
 
+                    {/* Tabbed Content: Description / Reviews / Shipping */}
+                    <div className="mb-16">
+                        <div className="flex gap-1 mb-8 p-1 rounded-full inline-flex" style={{ backgroundColor: 'var(--gray-100)' }}>
+                            {(['description', 'reviews', 'shipping'] as const).map(tab => (
+                                <button key={tab} onClick={() => setActiveTab(tab)}
+                                    className="px-6 py-2.5 rounded-full text-sm font-medium transition-all capitalize"
+                                    style={{
+                                        backgroundColor: activeTab === tab ? 'var(--white)' : 'transparent',
+                                        color: activeTab === tab ? 'var(--foreground)' : 'var(--gray-500)',
+                                        boxShadow: activeTab === tab ? 'var(--shadow-sm)' : 'none',
+                                    }}>
+                                    {tab === 'reviews' ? `Reviews (${reviews.length})` : tab}
+                                </button>
+                            ))}
+                        </div>
+
+                        {activeTab === 'description' && (
+                            <div className="prose max-w-none animate-fade-in">
+                                <p className="text-base leading-relaxed" style={{ color: 'var(--gray-500)' }}>{product.description}</p>
+                            </div>
+                        )}
+
+                        {activeTab === 'reviews' && (
+                            <div className="animate-fade-in">
+                                {/* Average rating summary */}
+                                {reviews.length > 0 && (
+                                    <div className="flex items-center gap-4 mb-8 p-6 rounded-2xl" style={{ backgroundColor: 'var(--white)', border: '1px solid var(--gray-200)' }}>
+                                        <div className="text-center">
+                                            <p className="text-4xl font-extrabold" style={{ color: 'var(--foreground)' }}>{avgRating.toFixed(1)}</p>
+                                            <StarRating rating={avgRating} size="md" />
+                                            <p className="text-xs mt-1" style={{ color: 'var(--gray-400)' }}>{reviews.length} review{reviews.length !== 1 ? 's' : ''}</p>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Review list */}
+                                <div className="space-y-4 mb-8">
+                                    {reviews.map(review => (
+                                        <div key={review.id} className="p-5 rounded-2xl" style={{ backgroundColor: 'var(--white)', border: '1px solid var(--gray-200)' }}>
+                                            <div className="flex items-center justify-between mb-2">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ backgroundColor: 'var(--green)' }}>
+                                                        {review.name.charAt(0).toUpperCase()}
+                                                    </div>
+                                                    <span className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{review.name}</span>
+                                                </div>
+                                                <span className="text-xs" style={{ color: 'var(--gray-400)' }}>{new Date(review.createdAt).toLocaleDateString()}</span>
+                                            </div>
+                                            <StarRating rating={review.rating} size="sm" />
+                                            <p className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--gray-500)' }}>{review.comment}</p>
+                                        </div>
+                                    ))}
+                                    {reviews.length === 0 && (
+                                        <p className="text-sm py-8 text-center" style={{ color: 'var(--gray-400)' }}>No reviews yet. Be the first!</p>
+                                    )}
+                                </div>
+
+                                {/* Write review form */}
+                                {!reviewSubmitted ? (
+                                    <form onSubmit={handleReviewSubmit} className="p-6 rounded-2xl space-y-4" style={{ backgroundColor: 'var(--white)', border: '1px solid var(--gray-200)' }}>
+                                        <h3 className="text-lg font-bold" style={{ color: 'var(--foreground)' }}>Write a Review</h3>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--gray-600)' }}>Your Name</label>
+                                            <input type="text" required value={reviewForm.name} onChange={e => setReviewForm(f => ({ ...f, name: e.target.value }))}
+                                                className="w-full px-4 py-3 rounded-xl text-sm outline-none" style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }} placeholder="Enter your name" />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--gray-600)' }}>Rating</label>
+                                            <StarRating rating={reviewForm.rating} size="lg" interactive onChange={r => setReviewForm(f => ({ ...f, rating: r }))} />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--gray-600)' }}>Your Review</label>
+                                            <textarea required rows={3} value={reviewForm.comment} onChange={e => setReviewForm(f => ({ ...f, comment: e.target.value }))}
+                                                className="w-full px-4 py-3 rounded-xl text-sm outline-none resize-none" style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }} placeholder="What did you think of this product?" />
+                                        </div>
+                                        <button type="submit" disabled={reviewSubmitting}
+                                            className="px-8 py-3 rounded-full text-sm font-bold text-white transition-all hover:scale-105 disabled:opacity-50"
+                                            style={{ backgroundColor: 'var(--accent)' }}>
+                                            {reviewSubmitting ? 'Submitting...' : 'Submit Review'}
+                                        </button>
+                                    </form>
+                                ) : (
+                                    <div className="p-6 rounded-2xl text-center" style={{ backgroundColor: 'var(--green-light)' }}>
+                                        <p className="text-sm font-semibold" style={{ color: 'var(--green)' }}>✓ Thank you! Your review has been submitted for approval.</p>
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {activeTab === 'shipping' && (
+                            <div className="space-y-4 animate-fade-in">
+                                {[
+                                    { title: 'Delivery', text: 'Free delivery across Kerala. Orders are typically delivered within 3-5 business days.' },
+                                    { title: 'Returns', text: 'Easy returns within 7 days of delivery. Product must be unused and in original packaging.' },
+                                    { title: 'Support', text: 'Reach us anytime via WhatsApp for order updates, questions, or assistance.' },
+                                ].map(item => (
+                                    <div key={item.title} className="p-5 rounded-2xl" style={{ backgroundColor: 'var(--white)', border: '1px solid var(--gray-200)' }}>
+                                        <h4 className="text-sm font-bold mb-1" style={{ color: 'var(--foreground)' }}>{item.title}</h4>
+                                        <p className="text-sm" style={{ color: 'var(--gray-500)' }}>{item.text}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
                     {/* Related Products */}
                     {related.length > 0 && (
                         <section>
@@ -258,9 +412,9 @@ export default function ProductDetailPage() {
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
                                 {related.map(p => (
                                     <Link href={`/product/${p.id}`} key={p.id} className="group block">
-                                        <div className="aspect-square rounded-[1.5rem] overflow-hidden mb-3 transition-transform duration-500 group-hover:shadow-lg" style={{ backgroundColor: '#F3F4F3' }}>
+                                        <div className="relative aspect-square rounded-[1.5rem] overflow-hidden mb-3 transition-transform duration-500 group-hover:shadow-lg" style={{ backgroundColor: '#F3F4F3' }}>
                                             {p.images?.[0] ? (
-                                                <img src={p.images[0]} alt={p.title} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+                                                <Image src={p.images[0]} alt={p.title} fill sizes="(max-width: 640px) 50vw, 25vw" className="object-cover transition-transform duration-700 group-hover:scale-105" />
                                             ) : (
                                                 <div className="w-full h-full flex items-center justify-center">
                                                     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--gray-300)" strokeWidth="1"><rect x="3" y="3" width="18" height="18" rx="2" /></svg>

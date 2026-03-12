@@ -1,6 +1,7 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { Product } from '@/lib/types';
 import { useCart } from '@/context/CartProvider';
@@ -14,6 +15,7 @@ export default function ProductCard({ product }: ProductCardProps) {
     const { addToCart } = useCart();
     const { toggleWishlist, isWishlisted } = useWishlist();
     const wishlisted = isWishlisted(product.id);
+    const [imgError, setImgError] = useState(false);
 
     return (
         <div className="group relative transition-all duration-500 hover:-translate-y-1">
@@ -23,11 +25,14 @@ export default function ProductCard({ product }: ProductCardProps) {
                 className="relative aspect-square overflow-hidden rounded-[2rem] mb-4 transition-transform duration-500 group-hover:shadow-[var(--shadow-lg)]"
                 style={{ backgroundColor: '#F3F4F3' }}
             >
-                {product.images?.[0] ? (
-                    <img
+                {product.images?.[0] && !imgError ? (
+                    <Image
                         src={product.images[0]}
                         alt={product.title}
-                        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                        fill
+                        sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
+                        className="object-cover transition-transform duration-700 group-hover:scale-105"
+                        onError={() => setImgError(true)}
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center">

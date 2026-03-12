@@ -3,13 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { signOut } from 'next-auth/react';
-import { Product } from '@/lib/types';
+import { Product, Order, Review } from '@/lib/types';
 
-const sidebarItems = [
-    { label: 'Dashboard', icon: 'grid', active: true },
-    { label: 'Catalog', icon: 'box', active: false },
-    { label: 'Orders', icon: 'clipboard', active: false },
-    { label: 'Resellers', icon: 'users', active: false },
+const sidebarItems: { label: string; icon: string; view?: 'catalog' | 'orders' | 'reviews' }[] = [
+    { label: 'Dashboard', icon: 'grid', view: 'catalog' },
+    { label: 'Catalog', icon: 'box', view: 'catalog' },
+    { label: 'Orders', icon: 'clipboard', view: 'orders' },
+    { label: 'Reviews', icon: 'star', view: 'reviews' },
+    { label: 'Resellers', icon: 'users' },
 ];
 
 const reportItems = [
@@ -47,6 +48,12 @@ function SidebarIcon({ type }: { type: string }) {
                     <circle cx="9" cy="7" r="4"></circle>
                     <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
                     <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+                </svg>
+            );
+        case 'star':
+            return (
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
                 </svg>
             );
         case 'chart':
@@ -130,10 +137,10 @@ function extractMeeshoProduct(html: string, sourceUrl: string): { url: string; t
     const cdnMatches = [...html.matchAll(/images\.meesho\.com\/images\/products\/[^"'\s\\]+/g)];
     cdnMatches.forEach(m => { if (!m[0].includes('profile')) images.push(`https://${m[0]}`); });
 
-    // Upgrade to 1024px and deduplicate
+    // Upgrade to highest available resolution and deduplicate
     images = Array.from(new Set(
         images.map(u => (u.startsWith('http') ? u : `https://${u}`)
-            .replace(/_([\d]+)\.(jpg|jpeg|webp|png)(\?.*)?$/i, '_1024.$2$3'))
+            .replace(/_([\d]+)\.(jpg|jpeg|webp|png)(\?.*)?$/i, '_1200.$2$3'))
     )).slice(0, 6);
 
     if (!title || !price) return null;
@@ -156,6 +163,17 @@ export default function AdminPage() {
     const [importLoading, setImportLoading] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
     const [importSuccess, setImportSuccess] = useState(false);
+    const [activeView, setActiveView] = useState<'catalog' | 'orders' | 'reviews'>('catalog');
+
+    // Orders state
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [ordersLoading, setOrdersLoading] = useState(false);
+    const [orderStatusFilter, setOrderStatusFilter] = useState<string>('all');
+    const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+
+    // Reviews state
+    const [reviews, setReviews] = useState<Review[]>([]);
+    const [reviewsLoading, setReviewsLoading] = useState(false);
 
     // Load staged products from API on mount
     useEffect(() => {
@@ -189,6 +207,101 @@ export default function AdminPage() {
         loadStaged();
         loadPublished();
     }, []);
+
+    // Fetch orders when switching to orders view
+    useEffect(() => {
+        if (activeView !== 'orders') return;
+        const loadOrders = async () => {
+            setOrdersLoading(true);
+            try {
+                const res = await fetch('/api/orders');
+                if (res.ok) {
+                    const data = await res.json();
+                    setOrders(Array.isArray(data) ? data : data.orders || []);
+                }
+            } catch (err) {
+                console.error('Failed to load orders:', err);
+            } finally {
+                setOrdersLoading(false);
+            }
+        };
+        loadOrders();
+    }, [activeView]);
+
+    // Fetch reviews when switching to reviews view
+    useEffect(() => {
+        if (activeView !== 'reviews') return;
+        const loadReviews = async () => {
+            setReviewsLoading(true);
+            try {
+                const res = await fetch('/api/reviews');
+                if (res.ok) {
+                    const data = await res.json();
+                    setReviews(Array.isArray(data) ? data : data.reviews || []);
+                }
+            } catch (err) {
+                console.error('Failed to load reviews:', err);
+            } finally {
+                setReviewsLoading(false);
+            }
+        };
+        loadReviews();
+    }, [activeView]);
+
+    const handleOrderStatusChange = async (orderId: string, newStatus: string) => {
+        try {
+            const res = await fetch('/api/orders', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: orderId, status: newStatus }),
+            });
+            if (res.ok) {
+                setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus as Order['status'] } : o));
+            }
+        } catch (err) {
+            console.error('Failed to update order status:', err);
+        }
+    };
+
+    const handleApproveReview = async (reviewId: string) => {
+        try {
+            const res = await fetch('/api/reviews', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: reviewId, approved: true }),
+            });
+            if (res.ok) {
+                setReviews(prev => prev.map(r => r.id === reviewId ? { ...r, approved: true } : r));
+            }
+        } catch (err) {
+            console.error('Failed to approve review:', err);
+        }
+    };
+
+    const handleDeleteReview = async (reviewId: string) => {
+        try {
+            const res = await fetch(`/api/reviews?id=${reviewId}`, {
+                method: 'DELETE',
+            });
+            if (res.ok) {
+                setReviews(prev => prev.filter(r => r.id !== reviewId));
+            }
+        } catch (err) {
+            console.error('Failed to delete review:', err);
+        }
+    };
+
+    const statusBadgeStyle = (status: string) => {
+        switch (status) {
+            case 'pending': return { backgroundColor: '#FEF3C7', color: '#D97706' };
+            case 'paid': return { backgroundColor: '#DBEAFE', color: '#2563EB' };
+            case 'shipped': return { backgroundColor: '#FFEDD5', color: '#EA580C' };
+            case 'delivered': return { backgroundColor: 'var(--green-light)', color: 'var(--green)' };
+            default: return { backgroundColor: 'var(--gray-100)', color: 'var(--gray-500)' };
+        }
+    };
+
+    const filteredOrders = orderStatusFilter === 'all' ? orders : orders.filter(o => o.status === orderStatusFilter);
 
     const handleDelete = async (productId: string) => {
         try {
@@ -425,8 +538,10 @@ export default function AdminPage() {
                         <p className="px-3 text-[10px] font-semibold tracking-widest uppercase mb-3" style={{ color: 'var(--gray-400)' }}>Management</p>
                         <nav className="space-y-1">
                             {sidebarItems.map(item => (
-                                <button key={item.label} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                                    style={{ backgroundColor: item.active ? 'var(--green)' : 'transparent', color: item.active ? 'white' : 'var(--gray-600)' }}>
+                                <button key={item.label}
+                                    onClick={() => { if (item.view) { setActiveView(item.view); setSidebarOpen(false); } }}
+                                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors"
+                                    style={{ backgroundColor: item.view === activeView ? 'var(--green)' : 'transparent', color: item.view === activeView ? 'white' : 'var(--gray-600)' }}>
                                     <SidebarIcon type={item.icon} />{item.label}
                                 </button>
                             ))}
@@ -476,7 +591,9 @@ export default function AdminPage() {
                                 <line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line>
                             </svg>
                         </button>
-                        <h1 className="text-lg font-semibold" style={{ color: 'var(--foreground)' }}>Catalog Manager</h1>
+                        <h1 className="text-lg font-semibold" style={{ color: 'var(--foreground)' }}>
+                            {activeView === 'catalog' ? 'Catalog Manager' : activeView === 'orders' ? 'Order Management' : 'Review Moderation'}
+                        </h1>
                     </div>
                     <div className="flex items-center gap-4">
                         <div className="flex items-center gap-3">
@@ -490,6 +607,7 @@ export default function AdminPage() {
                 </header>
 
                 <div className="flex-1 p-6 lg:p-10" style={{ backgroundColor: '#FAF8F5' }}>
+                    {activeView === 'catalog' && (<>
                     <div className="max-w-7xl mx-auto">
                         <div className="flex flex-col gap-6 mb-12">
                             <div>
@@ -649,6 +767,170 @@ export default function AdminPage() {
                             <p className="text-sm" style={{ color: 'var(--gray-400)' }}>
                                 {publishSuccess ? 'All items have been published to the store.' : 'Paste a Meesho product URL above and click Import.'}
                             </p>
+                        </div>
+                    )}
+                    </>)}
+
+                    {/* Orders Management View */}
+                    {activeView === 'orders' && (
+                        <div className="max-w-7xl mx-auto">
+                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+                                <div>
+                                    <h2 className="text-3xl font-extrabold mb-2 tracking-tight" style={{ color: 'var(--foreground)' }}>Orders</h2>
+                                    <p className="text-base font-medium" style={{ color: 'var(--gray-500)' }}>Manage and track customer orders.</p>
+                                </div>
+                                <select
+                                    value={orderStatusFilter}
+                                    onChange={e => setOrderStatusFilter(e.target.value)}
+                                    className="px-4 py-2.5 rounded-full text-sm font-medium outline-none"
+                                    style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: 'var(--white)' }}
+                                >
+                                    <option value="all">All Statuses</option>
+                                    <option value="pending">Pending</option>
+                                    <option value="paid">Paid</option>
+                                    <option value="shipped">Shipped</option>
+                                    <option value="delivered">Delivered</option>
+                                </select>
+                            </div>
+
+                            {ordersLoading ? (
+                                <div className="text-center py-20">
+                                    <p className="text-sm" style={{ color: 'var(--gray-400)' }}>Loading orders...</p>
+                                </div>
+                            ) : filteredOrders.length === 0 ? (
+                                <div className="text-center py-20 rounded-2xl" style={{ backgroundColor: 'var(--white)', border: '1px dashed var(--gray-300)' }}>
+                                    <p className="text-lg font-medium mb-1" style={{ color: 'var(--gray-400)' }}>No orders found</p>
+                                    <p className="text-sm" style={{ color: 'var(--gray-400)' }}>Orders will appear here when customers place them.</p>
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {filteredOrders.map(order => (
+                                        <div key={order.id} className="bg-white rounded-2xl p-5" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 cursor-pointer"
+                                                onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}>
+                                                <div className="flex items-center gap-4 flex-1 min-w-0">
+                                                    <div>
+                                                        <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>#{order.id.slice(0, 8)}</p>
+                                                        <p className="text-xs" style={{ color: 'var(--gray-400)' }}>{new Date(order.createdAt).toLocaleDateString()}</p>
+                                                    </div>
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-semibold truncate" style={{ color: 'var(--foreground)' }}>{order.customer.name}</p>
+                                                        <p className="text-xs" style={{ color: 'var(--gray-500)' }}>{order.customer.phone}</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-4">
+                                                    <p className="text-lg font-extrabold" style={{ color: 'var(--foreground)' }}>₹{order.total}</p>
+                                                    <span className="text-xs font-bold px-3 py-1 rounded-full" style={statusBadgeStyle(order.status)}>
+                                                        {order.status.charAt(0).toUpperCase() + order.status.slice(1)}
+                                                    </span>
+                                                    <select
+                                                        value={order.status}
+                                                        onChange={e => { e.stopPropagation(); handleOrderStatusChange(order.id, e.target.value); }}
+                                                        onClick={e => e.stopPropagation()}
+                                                        className="text-xs px-2 py-1 rounded-lg outline-none"
+                                                        style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: 'var(--white)' }}
+                                                    >
+                                                        <option value="pending">Pending</option>
+                                                        <option value="paid">Paid</option>
+                                                        <option value="shipped">Shipped</option>
+                                                        <option value="delivered">Delivered</option>
+                                                    </select>
+                                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                                                        style={{ transform: expandedOrderId === order.id ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                                                        <polyline points="6 9 12 15 18 9"></polyline>
+                                                    </svg>
+                                                </div>
+                                            </div>
+                                            {expandedOrderId === order.id && (
+                                                <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--gray-200)' }}>
+                                                    <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--gray-400)' }}>Order Items</p>
+                                                    <div className="space-y-2">
+                                                        {order.items.map((item, i) => (
+                                                            <div key={i} className="flex items-center gap-3 p-2 rounded-xl" style={{ backgroundColor: 'var(--gray-100)' }}>
+                                                                {item.product.images?.[0] && (
+                                                                    <img src={item.product.images[0]} alt={item.product.title} className="w-10 h-10 rounded-lg object-cover" />
+                                                                )}
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>{item.product.title}</p>
+                                                                    <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Qty: {item.quantity} × ₹{item.product.sellingPrice}</p>
+                                                                </div>
+                                                                <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>₹{item.quantity * item.product.sellingPrice}</p>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    <div className="mt-3 text-right">
+                                                        <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+                                                            {order.customer.address}, {order.customer.city}, {order.customer.state} - {order.customer.pincode}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Reviews Moderation View */}
+                    {activeView === 'reviews' && (
+                        <div className="max-w-7xl mx-auto">
+                            <div className="mb-8">
+                                <h2 className="text-3xl font-extrabold mb-2 tracking-tight" style={{ color: 'var(--foreground)' }}>Reviews</h2>
+                                <p className="text-base font-medium" style={{ color: 'var(--gray-500)' }}>Moderate customer reviews.</p>
+                            </div>
+
+                            {reviewsLoading ? (
+                                <div className="text-center py-20">
+                                    <p className="text-sm" style={{ color: 'var(--gray-400)' }}>Loading reviews...</p>
+                                </div>
+                            ) : reviews.length === 0 ? (
+                                <div className="text-center py-20 rounded-2xl" style={{ backgroundColor: 'var(--white)', border: '1px dashed var(--gray-300)' }}>
+                                    <p className="text-lg font-medium mb-1" style={{ color: 'var(--gray-400)' }}>No reviews yet</p>
+                                    <p className="text-sm" style={{ color: 'var(--gray-400)' }}>Customer reviews will appear here.</p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                                    {reviews.map(review => (
+                                        <div key={review.id} className="bg-white rounded-2xl p-5" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                            <div className="flex items-center justify-between mb-3">
+                                                <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>{review.name}</p>
+                                                <p className="text-xs" style={{ color: 'var(--gray-400)' }}>{new Date(review.createdAt).toLocaleDateString()}</p>
+                                            </div>
+                                            <div className="flex items-center gap-1 mb-2">
+                                                {[1, 2, 3, 4, 5].map(star => (
+                                                    <svg key={star} width="14" height="14" viewBox="0 0 24 24"
+                                                        fill={star <= review.rating ? 'var(--accent)' : 'none'}
+                                                        stroke={star <= review.rating ? 'var(--accent)' : 'var(--gray-300)'} strokeWidth="2">
+                                                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                                    </svg>
+                                                ))}
+                                            </div>
+                                            <p className="text-xs mb-1" style={{ color: 'var(--gray-400)' }}>Product: {review.productId.slice(0, 8)}…</p>
+                                            <p className="text-sm mb-4" style={{ color: 'var(--gray-600)' }}>{review.comment}</p>
+                                            <div className="flex gap-2">
+                                                {!review.approved ? (
+                                                    <button onClick={() => handleApproveReview(review.id)}
+                                                        className="flex-1 text-xs font-bold py-2.5 rounded-full transition-all hover:opacity-80"
+                                                        style={{ backgroundColor: 'var(--green-light)', color: 'var(--green)' }}>
+                                                        Approve
+                                                    </button>
+                                                ) : (
+                                                    <span className="flex-1 text-xs font-bold py-2.5 rounded-full text-center"
+                                                        style={{ backgroundColor: 'var(--green-light)', color: 'var(--green)' }}>
+                                                        ✓ Approved
+                                                    </span>
+                                                )}
+                                                <button onClick={() => handleDeleteReview(review.id)}
+                                                    className="flex-1 text-xs font-bold py-2.5 rounded-full transition-all hover:opacity-80"
+                                                    style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>

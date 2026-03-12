@@ -111,6 +111,7 @@ export default function Footer() {
                                 <li><Link href="/new-arrivals" className="text-sm hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>New Arrivals</Link></li>
                                 <li><Link href="/wishlist" className="text-sm hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Wishlist</Link></li>
                                 <li><Link href="/bulk-order" className="text-sm hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Bulk Pricing</Link></li>
+                                <li><Link href="/orders" className="text-sm hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Track Order</Link></li>
                             </ul>
                         </div>
 
@@ -118,6 +119,7 @@ export default function Footer() {
                         <div>
                             <h4 className="text-sm font-semibold mb-4" style={{ color: 'var(--gray-400)' }}>HELP</h4>
                             <ul className="space-y-3">
+                                <li><Link href="/about" className="text-sm hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>About Us</Link></li>
                                 <li><Link href="/shipping-policy" className="text-sm hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Shipping Policy</Link></li>
                                 <li><Link href="/returns" className="text-sm hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Returns & Refunds</Link></li>
                                 <li><Link href="/faq" className="text-sm hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>FAQs</Link></li>

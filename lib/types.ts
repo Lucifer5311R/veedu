@@ -39,3 +39,13 @@ export interface CustomerDetails {
     state: string;
     pincode: string;
 }
+
+export interface Review {
+    id: string;
+    productId: string;
+    name: string;
+    rating: number;
+    comment: string;
+    approved: boolean;
+    createdAt: string;
+}

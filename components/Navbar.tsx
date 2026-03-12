@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useCart } from '@/context/CartProvider';
 import { useWishlist } from '@/context/WishlistProvider';
 import { useSession } from 'next-auth/react';
+import { trackSearch } from '@/lib/analytics';
 
 export default function Navbar() {
     const { itemCount } = useCart();
@@ -18,7 +19,12 @@ export default function Navbar() {
     const handleSearch = (e: React.FormEvent) => {
         e.preventDefault();
         const q = searchValue.trim();
-        router.push(q ? `/?search=${encodeURIComponent(q)}` : '/');
+        if (q) {
+            trackSearch(q);
+            router.push(`/search?q=${encodeURIComponent(q)}`);
+        } else {
+            router.push('/catalog');
+        }
         setMobileOpen(false);
     };
 
@@ -41,7 +47,8 @@ export default function Navbar() {
                     <div className="hidden md:flex items-center gap-8">
                         <Link href="/catalog" className="text-sm font-medium hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Catalog</Link>
                         <Link href="/new-arrivals" className="text-sm font-medium hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>New Arrivals</Link>
-                        <Link href="/wishlist" className="text-sm font-medium hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Wishlist</Link>
+                        <Link href="/about" className="text-sm font-medium hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>About</Link>
+                        <Link href="/orders" className="text-sm font-medium hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Orders</Link>
                         <Link href="/bulk-order" className="text-sm font-medium hover:opacity-70 transition-opacity" style={{ color: 'var(--gray-600)' }}>Bulk Order</Link>
                     </div>
 
@@ -148,6 +155,8 @@ export default function Navbar() {
                     <div className="px-4 py-4 flex flex-col gap-3">
                         <Link href="/catalog" className="text-sm font-medium py-2" style={{ color: 'var(--gray-600)' }} onClick={() => setMobileOpen(false)}>Catalog</Link>
                         <Link href="/new-arrivals" className="text-sm font-medium py-2" style={{ color: 'var(--gray-600)' }} onClick={() => setMobileOpen(false)}>New Arrivals</Link>
+                        <Link href="/about" className="text-sm font-medium py-2" style={{ color: 'var(--gray-600)' }} onClick={() => setMobileOpen(false)}>About</Link>
+                        <Link href="/orders" className="text-sm font-medium py-2" style={{ color: 'var(--gray-600)' }} onClick={() => setMobileOpen(false)}>Orders</Link>
                         <Link href="/wishlist" className="text-sm font-medium py-2" style={{ color: 'var(--gray-600)' }} onClick={() => setMobileOpen(false)}>Wishlist</Link>
                         <Link href="/bulk-order" className="text-sm font-medium py-2" style={{ color: 'var(--gray-600)' }} onClick={() => setMobileOpen(false)}>Bulk Order</Link>
                         <form onSubmit={handleSearch} className="flex items-center gap-2 px-3 py-2 rounded-full mt-1" style={{ backgroundColor: 'var(--gray-100)' }}>

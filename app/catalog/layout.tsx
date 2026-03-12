@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-    title: "Shop All Products — Veedu",
-    description: "Browse our full catalog of premium home accessories, kitchen essentials, and modern home utility items. Free shipping on orders over ₹499.",
+    title: "Catalog — Shop All Products",
+    description:
+        "Browse our complete collection of home & kitchen essentials. Quality products at the best prices, delivered across Kerala.",
     openGraph: {
-        title: "Shop All Products — Veedu",
-        description: "Browse our full catalog of premium home accessories, kitchen essentials, and modern home utility items.",
-        type: "website",
+        title: "Catalog — Shop All Products",
+        description:
+            "Browse our complete collection of home & kitchen essentials. Quality products at the best prices, delivered across Kerala.",
     },
 };
 

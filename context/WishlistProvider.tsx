@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Product } from '@/lib/types';
+import { trackAddToWishlist } from '@/lib/analytics';
 
 interface WishlistContextType {
     wishlist: Product[];
@@ -37,6 +38,9 @@ export function WishlistProvider({ children }: { children: React.ReactNode }) {
     const toggleWishlist = useCallback((product: Product) => {
         setWishlist(prev => {
             const exists = prev.find(p => p.id === product.id);
+            if (!exists) {
+                trackAddToWishlist({ id: product.id, title: product.title, price: product.sellingPrice });
+            }
             return exists ? prev.filter(p => p.id !== product.id) : [...prev, product];
         });
     }, []);

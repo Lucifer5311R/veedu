@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { Product, CartItem } from '@/lib/types';
+import { trackAddToCart, trackRemoveFromCart } from '@/lib/analytics';
 
 interface CartContextType {
     items: CartItem[];
@@ -20,7 +21,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const [items, setItems] = useState<CartItem[]>([]);
     const [isHydrated, setIsHydrated] = useState(false);
 
-    // Load cart from localStorage on mount
     useEffect(() => {
         const stored = localStorage.getItem('veedu-cart');
         if (stored) {
@@ -33,7 +33,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setIsHydrated(true);
     }, []);
 
-    // Persist cart to localStorage
     useEffect(() => {
         if (isHydrated) {
             localStorage.setItem('veedu-cart', JSON.stringify(items));
@@ -41,6 +40,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }, [items, isHydrated]);
 
     const addToCart = useCallback((product: Product) => {
+        trackAddToCart({ id: product.id, title: product.title, price: product.sellingPrice, category: product.category });
         setItems(prev => {
             const existing = prev.find(item => item.product.id === product.id);
             if (existing) {
@@ -55,7 +55,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const removeFromCart = useCallback((productId: string) => {
-        setItems(prev => prev.filter(item => item.product.id !== productId));
+        setItems(prev => {
+            const item = prev.find(i => i.product.id === productId);
+            if (item) trackRemoveFromCart({ id: item.product.id, title: item.product.title, price: item.product.sellingPrice });
+            return prev.filter(i => i.product.id !== productId);
+        });
     }, []);
 
     const updateQuantity = useCallback((productId: string, quantity: number) => {
