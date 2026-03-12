@@ -64,8 +64,8 @@ function cleanImages(urls: string[]): string[] {
  * Worker code lives in cf-worker/worker.js — deploy once to Cloudflare for free.
  */
 async function fetchViaCloudflareProxy(url: string): Promise<MeeshoProductData | null> {
-    const proxyUrl = process.env.CF_PROXY_URL;
-    const proxySecret = process.env.CF_PROXY_SECRET;
+    const proxyUrl = process.env.CF_PROXY_URL || process.env.NEXT_PUBLIC_CF_PROXY_URL;
+    const proxySecret = process.env.CF_PROXY_SECRET || process.env.NEXT_PUBLIC_CF_PROXY_SECRET;
     if (!proxyUrl || !proxySecret) return null;
 
     try {
