@@ -586,7 +586,7 @@ export default function AdminPage() {
                             </svg>
                             <p className="text-lg font-medium mb-1" style={{ color: 'var(--gray-400)' }}>No staged items</p>
                             <p className="text-sm" style={{ color: 'var(--gray-400)' }}>
-                                {publishSuccess ? 'All items have been published to the store.' : 'Drag the Veedu Importer button to your bookmarks and click it on Meesho to import.'}
+                                {publishSuccess ? 'All items have been published to the store.' : 'Paste a Meesho product URL above and click Import.'}
                             </p>
                         </div>
                     )}
