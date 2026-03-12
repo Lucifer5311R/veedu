@@ -63,7 +63,7 @@ function SidebarIcon({ type }: { type: string }) {
 }
 
 /** Parse Meesho product HTML in the browser using DOMParser — no server needed */
-function extractMeeshoProduct(html: string, sourceUrl: string): { url: string; title: string; price: number; images: string[] } | null {
+function extractMeeshoProduct(html: string, sourceUrl: string): { url: string; title: string; price: number; images: string[]; description: string } | null {
     if (!html || html.includes('Access Denied') || html.length < 5000) return null;
 
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -137,7 +137,7 @@ function extractMeeshoProduct(html: string, sourceUrl: string): { url: string; t
     )).slice(0, 6);
 
     if (!title || !price) return null;
-    return { url: sourceUrl, title, price, images };
+    return { url: sourceUrl, title, price, images, description };
 }
 
 export default function AdminPage() {
@@ -152,6 +152,7 @@ export default function AdminPage() {
     const [newImageUrl, setNewImageUrl] = useState('');
     const [publishSuccess, setPublishSuccess] = useState(false);
     const [importUrl, setImportUrl] = useState('');
+    const [pasteHtml, setPasteHtml] = useState('');
     const [importLoading, setImportLoading] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
     const [importSuccess, setImportSuccess] = useState(false);
@@ -265,65 +266,37 @@ export default function AdminPage() {
         }
     };
 
-    const handleImport = async () => {
-        if (!importUrl.trim()) return;
+    const handleHtmlImport = async () => {
+        const html = pasteHtml.trim();
+        const url = importUrl.trim() || 'https://meesho.com';
+        if (!html) return;
+
         setImportLoading(true);
         setImportError(null);
         setImportSuccess(false);
 
-        const url = importUrl.trim();
-
-        // ── Approach 1: Browser-side fetch via CF Worker ──────────────────────
-        // Browser IP is never blocked; CF Worker adds CORS headers so browser can read HTML.
-        const cfProxyUrl = process.env.NEXT_PUBLIC_CF_PROXY_URL;
-        const cfSecret   = process.env.NEXT_PUBLIC_CF_PROXY_SECRET;
-
-        if (cfProxyUrl && cfSecret) {
-            try {
-                const proxyRes = await fetch(cfProxyUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfSecret}` },
-                    body: JSON.stringify({ url }),
-                });
-
-                if (proxyRes.ok) {
-                    const html = await proxyRes.text();
-                    const product = extractMeeshoProduct(html, url);
-                    if (product) {
-                        const saveRes = await fetch('/api/admin/scrape-meesho', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(product),
-                        });
-                        const saved = await saveRes.json();
-                        if (saveRes.ok && saved.success) {
-                            setStagedProducts(prev => [...prev, saved.product]);
-                            setImportUrl('');
-                            setImportSuccess(true);
-                            setTimeout(() => setImportSuccess(false), 4000);
-                            setImportLoading(false);
-                            return;
-                        }
-                    }
-                }
-            } catch { /* fall through to server-side */ }
+        const product = extractMeeshoProduct(html, url);
+        if (!product) {
+            setImportError('Could not read product from the pasted source. Make sure you copied the full page (Ctrl+A → Ctrl+C).');
+            setImportLoading(false);
+            return;
         }
 
-        // ── Approach 2: Server-side fetch (may be blocked on Vercel) ─────────
         try {
-            const res = await fetch('/api/admin/fetch-meesho', {
+            const res = await fetch('/api/admin/scrape-meesho', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url }),
+                body: JSON.stringify(product),
             });
             const data = await res.json();
             if (res.ok && data.success) {
                 setStagedProducts(prev => [...prev, data.product]);
                 setImportUrl('');
+                setPasteHtml('');
                 setImportSuccess(true);
                 setTimeout(() => setImportSuccess(false), 4000);
             } else {
-                setImportError(data.error || 'Failed to import product');
+                setImportError(data.error || 'Failed to save product');
             }
         } catch {
             setImportError('Network error. Please try again.');
@@ -425,44 +398,74 @@ export default function AdminPage() {
 
                 <div className="flex-1 p-6 lg:p-10" style={{ backgroundColor: '#FAF8F5' }}>
                     <div className="max-w-7xl mx-auto">
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 mb-12">
+                        <div className="flex flex-col gap-6 mb-12">
                             <div>
                                 <h2 className="text-3xl font-extrabold mb-2 tracking-tight" style={{ color: 'var(--foreground)' }}>Catalog Manager</h2>
-                                <p className="text-base font-medium" style={{ color: 'var(--gray-500)' }}>Import items securely bypassing bot protection.</p>
+                                <p className="text-base font-medium" style={{ color: 'var(--gray-500)' }}>Import products from Meesho in 3 steps.</p>
                             </div>
 
-                            <div className="flex-1 w-full sm:max-w-lg bg-white p-4 rounded-3xl shadow-[var(--shadow-sm)] border">
-                                <p className="text-xs font-bold mb-3" style={{ color: 'var(--gray-500)' }}>
-                                    📦 Import from Meesho
-                                </p>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="url"
-                                        placeholder="https://meesho.com/product/..."
-                                        value={importUrl}
-                                        onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
-                                        onKeyDown={e => e.key === 'Enter' && handleImport()}
-                                        className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
-                                        style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
+                            <div className="bg-white p-5 rounded-3xl shadow-sm border" style={{ borderColor: 'var(--gray-200)' }}>
+                                <p className="text-xs font-bold mb-4 uppercase tracking-wider" style={{ color: 'var(--gray-400)' }}>📦 Import from Meesho</p>
+
+                                {/* Step 1 */}
+                                <div className="mb-4">
+                                    <p className="text-sm font-semibold mb-2" style={{ color: 'var(--foreground)' }}>1. Open the product page</p>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="url"
+                                            placeholder="https://meesho.com/product/..."
+                                            value={importUrl}
+                                            onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
+                                            className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
+                                            style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
+                                            disabled={importLoading}
+                                        />
+                                        <button
+                                            onClick={() => importUrl.trim() && window.open(importUrl.trim(), '_blank')}
+                                            disabled={!importUrl.trim()}
+                                            className="px-5 py-2.5 rounded-full text-sm font-bold transition-all hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed"
+                                            style={{ backgroundColor: 'var(--gray-100)', color: 'var(--foreground)', border: '1px solid var(--gray-200)' }}
+                                        >
+                                            Open ↗
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {/* Step 2 */}
+                                <div className="mb-4 px-4 py-3 rounded-2xl" style={{ backgroundColor: '#F8F9FA' }}>
+                                    <p className="text-sm font-semibold mb-1" style={{ color: 'var(--foreground)' }}>2. Copy the page source</p>
+                                    <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+                                        On the opened page press <kbd className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+U</kbd> to view source, then <kbd className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+A</kbd> → <kbd className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+C</kbd> to copy all.
+                                    </p>
+                                </div>
+
+                                {/* Step 3 */}
+                                <div className="mb-4">
+                                    <p className="text-sm font-semibold mb-2" style={{ color: 'var(--foreground)' }}>3. Paste &amp; Import</p>
+                                    <textarea
+                                        placeholder="Paste the page source here (Ctrl+V)…"
+                                        value={pasteHtml}
+                                        onChange={e => { setPasteHtml(e.target.value); setImportError(null); }}
+                                        rows={4}
+                                        className="w-full px-4 py-3 rounded-2xl text-xs font-mono outline-none resize-none"
+                                        style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: '#FAFAFA' }}
                                         disabled={importLoading}
                                     />
                                     <button
-                                        onClick={handleImport}
-                                        disabled={importLoading || !importUrl.trim()}
-                                        className="px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                                        onClick={handleHtmlImport}
+                                        disabled={importLoading || !pasteHtml.trim()}
+                                        className="mt-2 w-full py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                                         style={{ backgroundColor: 'var(--green)' }}
                                     >
-                                        {importLoading ? '⏳' : 'Import'}
+                                        {importLoading ? '⏳ Importing…' : 'Import Product'}
                                     </button>
                                 </div>
-                                {importLoading && (
-                                    <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>Fetching product details…</p>
-                                )}
+
                                 {importSuccess && (
-                                    <p className="text-xs mt-2 font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>
+                                    <p className="text-xs font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>
                                 )}
                                 {importError && (
-                                    <p className="text-xs mt-2 font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
+                                    <p className="text-xs font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
                                 )}
                             </div>
                         </div>
