@@ -285,7 +285,7 @@ export default function AdminPage() {
         return false;
     };
 
-    // Primary: fetch via free public CORS proxy (browser-side, no extra setup)
+    // Primary: Vercel Edge proxy (runs on Cloudflare IPs — bypasses Meesho/Akamai)
     const handleImport = async () => {
         const url = importUrl.trim();
         if (!url) return;
@@ -293,28 +293,21 @@ export default function AdminPage() {
         setImportError(null);
         setImportSuccess(false);
 
-        const proxies = [
-            `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-            `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
-        ];
-
-        for (const proxyUrl of proxies) {
-            try {
-                const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
-                if (!res.ok) continue;
-                const json = await res.json();
-                // allorigins wraps in { contents: "..." }, corsproxy returns text directly
-                const html: string = json.contents ?? json;
-                if (typeof html !== 'string' || html.length < 5000) continue;
+        try {
+            const res = await fetch(`/api/admin/proxy-meesho?url=${encodeURIComponent(url)}`, {
+                signal: AbortSignal.timeout(20000),
+            });
+            if (res.ok) {
+                const html = await res.text();
                 const product = extractMeeshoProduct(html, url);
                 if (product && await saveProduct(product)) {
                     setImportLoading(false);
                     return;
                 }
-            } catch { /* try next */ }
-        }
+            }
+        } catch { /* fall through */ }
 
-        setImportError('Auto-fetch failed. Paste the page source below instead.');
+        setImportError('Auto-fetch failed. Use the manual fallback below.');
         setImportLoading(false);
     };
 
