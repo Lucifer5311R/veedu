@@ -58,7 +58,31 @@ function cleanImages(urls: string[]): string[] {
 }
 
 /**
- * APPROACH 1: Our own Cloudflare Worker proxy.
+ * APPROACH 1: ScraperAPI — free 1000 req/month, bypasses Akamai with residential IPs.
+ * Sign up at scraperapi.com (no credit card), add SCRAPERAPI_KEY to Vercel env vars.
+ */
+async function fetchViaScraperAPI(url: string): Promise<MeeshoProductData | null> {
+    const apiKey = process.env.SCRAPERAPI_KEY;
+    if (!apiKey) return null;
+
+    try {
+        const scraperUrl = `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&render=false`;
+        const res = await fetch(scraperUrl, { signal: AbortSignal.timeout(30000) });
+        if (!res.ok) {
+            console.warn('[Meesho/ScraperAPI] Failed:', res.status);
+            return null;
+        }
+        const html = await res.text();
+        console.log('[Meesho/ScraperAPI] Got HTML len:', html.length);
+        return extractFromHtml(html);
+    } catch (err) {
+        console.warn('[Meesho/ScraperAPI] failed:', err);
+        return null;
+    }
+}
+
+/**
+ * APPROACH 2: Our own Cloudflare Worker proxy.
  * Fetches from Cloudflare's network (different IPs, not blocked by Meesho/Akamai).
  * Set CF_PROXY_URL + CF_PROXY_SECRET in Vercel env vars.
  * Worker code lives in cf-worker/worker.js — deploy once to Cloudflare for free.
@@ -372,22 +396,21 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-        // Try our Cloudflare Worker proxy first (set CF_PROXY_URL + CF_PROXY_SECRET in Vercel)
-        let productData = await fetchViaCloudflareProxy(url);
+        // 1. ScraperAPI (set SCRAPERAPI_KEY in Vercel — free 1000/month at scraperapi.com)
+        let productData = await fetchViaScraperAPI(url);
 
+        // 2. CF Worker proxy (set NEXT_PUBLIC_CF_PROXY_URL + NEXT_PUBLIC_CF_PROXY_SECRET)
+        if (!productData) productData = await fetchViaCloudflareProxy(url);
+
+        // 3. Direct HTTP (usually blocked on Vercel, but try anyway)
         if (!productData) {
-            console.log('[Meesho] Trying direct HTTP (no-www + www)...');
+            console.log('[Meesho] Trying direct HTTP...');
             productData = await fetchViaMobileHttp(url);
-        }
-
-        if (!productData) {
-            console.log('[Meesho] HTTP failed, trying Playwright...');
-            productData = await fetchViaPlaywright(url);
         }
 
         if (!productData || !productData.title || !productData.price) {
             return NextResponse.json(
-                { error: 'Could not extract product details. Make sure the URL is a valid Meesho product page.' },
+                { error: 'Could not fetch product. Add SCRAPERAPI_KEY to Vercel env vars (free at scraperapi.com) to enable auto-import.' },
                 { status: 422 }
             );
         }

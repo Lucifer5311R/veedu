@@ -285,7 +285,7 @@ export default function AdminPage() {
         return false;
     };
 
-    // Primary: Vercel Edge proxy (runs on Cloudflare IPs — bypasses Meesho/Akamai)
+    // Primary: server-side fetch (uses ScraperAPI or CF proxy if env vars set)
     const handleImport = async () => {
         const url = importUrl.trim();
         if (!url) return;
@@ -294,20 +294,24 @@ export default function AdminPage() {
         setImportSuccess(false);
 
         try {
-            const res = await fetch(`/api/admin/proxy-meesho?url=${encodeURIComponent(url)}`, {
-                signal: AbortSignal.timeout(20000),
+            const res = await fetch('/api/admin/fetch-meesho', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url }),
             });
-            if (res.ok) {
-                const html = await res.text();
-                const product = extractMeeshoProduct(html, url);
-                if (product && await saveProduct(product)) {
-                    setImportLoading(false);
-                    return;
-                }
+            const data = await res.json();
+            if (res.ok && data.success) {
+                setStagedProducts(prev => [...prev, data.product]);
+                setImportUrl('');
+                setImportSuccess(true);
+                setTimeout(() => setImportSuccess(false), 4000);
+                setImportLoading(false);
+                return;
             }
-        } catch { /* fall through */ }
-
-        setImportError('Auto-fetch failed. Use the manual fallback below.');
+            setImportError(data.error || 'Import failed.');
+        } catch {
+            setImportError('Network error. Try the manual fallback below.');
+        }
         setImportLoading(false);
     };
 
