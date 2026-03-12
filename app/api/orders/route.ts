@@ -18,7 +18,11 @@ function readOrders(): Order[] {
 }
 
 function writeOrders(orders: Order[]) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(orders, null, 2));
+    try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(orders, null, 2));
+    } catch (err) {
+        console.error('Failed to write orders:', err);
+    }
 }
 
 // ─── Supabase helpers ───────────────────────────────────────────────────────
@@ -39,7 +43,7 @@ function rowToOrder(row: Record<string, any>): Order {
         customer: row.customer,
         upiTransactionId: row.upi_transaction_id ?? undefined,
         status: row.status,
-        createdAt: row.created_at,
+        createdAt: row.created_at ?? row.createdAt,
     };
 }
 
@@ -58,65 +62,78 @@ function orderToRow(order: Partial<Order>): Record<string, unknown> {
     return row;
 }
 
+// Helper: try Supabase query, fall back to null if table doesn't exist
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function trySupabase<T>(fn: (sb: any) => Promise<{ data: T | null; error: any }>): Promise<{ data: T | null; ok: boolean }> {
+    if (!useSupabase) return { data: null, ok: false };
+    try {
+        const sb = await getSupabase();
+        const { data, error } = await fn(sb);
+        if (error) {
+            // 42P01 = table doesn't exist — fall back to JSON
+            if (error.code === '42P01' || error.message?.includes('does not exist')) {
+                console.warn('Supabase orders table not found, using JSON fallback');
+                return { data: null, ok: false };
+            }
+            throw error;
+        }
+        return { data, ok: true };
+    } catch (err) {
+        console.warn('Supabase orders query failed, using JSON fallback:', err);
+        return { data: null, ok: false };
+    }
+}
+
 // ─── GET /api/orders ────────────────────────────────────────────────────────
 export async function GET(req: NextRequest) {
-    const { searchParams } = new URL(req.url);
-    const phone = searchParams.get('phone');
-    const id = searchParams.get('id');
+    try {
+        const { searchParams } = new URL(req.url);
+        const phone = searchParams.get('phone');
+        const id = searchParams.get('id');
 
-    // Lookup by phone (public)
-    if (phone) {
-        if (useSupabase) {
-            const supabase = await getSupabase();
-            const { data, error } = await supabase
-                .from('orders')
-                .select('*')
-                .eq('customer->>phone', phone)
-                .order('created_at', { ascending: false });
-            if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-            return NextResponse.json((data || []).map(rowToOrder));
+        // Lookup by phone (public)
+        if (phone) {
+            const { data, ok } = await trySupabase<Record<string, unknown>[]>(sb =>
+                sb.from('orders').select('*').eq('customer->>phone', phone).order('created_at', { ascending: false })
+            );
+            if (ok) return NextResponse.json((data || []).map(rowToOrder));
+
+            const orders = readOrders()
+                .filter(o => o.customer?.phone === phone)
+                .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+            return NextResponse.json(orders);
         }
-        const orders = readOrders()
-            .filter(o => o.customer.phone === phone)
-            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        // Lookup by ID (public)
+        if (id) {
+            const { data, ok } = await trySupabase<Record<string, unknown>>(sb =>
+                sb.from('orders').select('*').eq('id', id).single()
+            );
+            if (ok && data) return NextResponse.json(rowToOrder(data));
+            if (ok && !data) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+
+            const order = readOrders().find(o => o.id === id);
+            if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+            return NextResponse.json(order);
+        }
+
+        // Admin: return all orders
+        const session = await auth();
+        if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+        const { data, ok } = await trySupabase<Record<string, unknown>[]>(sb =>
+            sb.from('orders').select('*').order('created_at', { ascending: false })
+        );
+        if (ok) return NextResponse.json((data || []).map(rowToOrder));
+
+        const orders = readOrders().sort(
+            (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
         return NextResponse.json(orders);
+    } catch (err) {
+        console.error('GET /api/orders error:', err);
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
-
-    // Lookup by ID (public)
-    if (id) {
-        if (useSupabase) {
-            const supabase = await getSupabase();
-            const { data, error } = await supabase
-                .from('orders')
-                .select('*')
-                .eq('id', id)
-                .single();
-            if (error || !data) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-            return NextResponse.json(rowToOrder(data));
-        }
-        const order = readOrders().find(o => o.id === id);
-        if (!order) return NextResponse.json({ error: 'Order not found' }, { status: 404 });
-        return NextResponse.json(order);
-    }
-
-    // Admin: return all orders
-    const session = await auth();
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    if (useSupabase) {
-        const supabase = await getSupabase();
-        const { data, error } = await supabase
-            .from('orders')
-            .select('*')
-            .order('created_at', { ascending: false });
-        if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-        return NextResponse.json((data || []).map(rowToOrder));
-    }
-
-    const orders = readOrders().sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-    return NextResponse.json(orders);
 }
 
 // ─── POST /api/orders ───────────────────────────────────────────────────────
@@ -144,32 +161,27 @@ export async function POST(req: NextRequest) {
             createdAt: new Date().toISOString(),
         };
 
-        if (useSupabase) {
-            const supabase = await getSupabase();
-            const { data, error } = await supabase
-                .from('orders')
-                .insert(orderToRow(newOrder))
-                .select()
-                .single();
-            if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-            return NextResponse.json(rowToOrder(data), { status: 201 });
-        }
+        const { data, ok } = await trySupabase<Record<string, unknown>>(sb =>
+            sb.from('orders').insert(orderToRow(newOrder)).select().single()
+        );
+        if (ok && data) return NextResponse.json(rowToOrder(data), { status: 201 });
 
         const orders = readOrders();
         orders.push(newOrder);
         writeOrders(orders);
         return NextResponse.json(newOrder, { status: 201 });
-    } catch {
+    } catch (err) {
+        console.error('POST /api/orders error:', err);
         return NextResponse.json({ error: 'Failed to create order' }, { status: 500 });
     }
 }
 
 // ─── PATCH /api/orders ──────────────────────────────────────────────────────
 export async function PATCH(req: NextRequest) {
-    const session = await auth();
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
     try {
+        const session = await auth();
+        if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
         const body = await req.json();
         const { id, status } = body;
 
@@ -182,17 +194,10 @@ export async function PATCH(req: NextRequest) {
             return NextResponse.json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` }, { status: 400 });
         }
 
-        if (useSupabase) {
-            const supabase = await getSupabase();
-            const { data, error } = await supabase
-                .from('orders')
-                .update({ status })
-                .eq('id', id)
-                .select()
-                .single();
-            if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-            return NextResponse.json(rowToOrder(data));
-        }
+        const { data, ok } = await trySupabase<Record<string, unknown>>(sb =>
+            sb.from('orders').update({ status }).eq('id', id).select().single()
+        );
+        if (ok && data) return NextResponse.json(rowToOrder(data));
 
         const orders = readOrders();
         const index = orders.findIndex(o => o.id === id);
@@ -200,7 +205,8 @@ export async function PATCH(req: NextRequest) {
         orders[index] = { ...orders[index], status };
         writeOrders(orders);
         return NextResponse.json(orders[index]);
-    } catch {
+    } catch (err) {
+        console.error('PATCH /api/orders error:', err);
         return NextResponse.json({ error: 'Failed to update order' }, { status: 500 });
     }
 }
