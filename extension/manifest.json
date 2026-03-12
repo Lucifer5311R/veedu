@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Veedu Importer",
+  "version": "1.0",
+  "description": "Import Meesho products to your Veedu store with one click",
+  "icons": {
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.meesho.com/*/p/*", "*://meesho.com/*/p/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [],
+  "host_permissions": ["*://*.vercel.app/*", "http://localhost:3000/*"]
+}

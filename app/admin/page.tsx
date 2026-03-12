@@ -285,52 +285,48 @@ export default function AdminPage() {
         return false;
     };
 
-    // Primary: server-side fetch (uses ScraperAPI or CF proxy if env vars set)
-    const handleImport = async () => {
-        const url = importUrl.trim();
-        if (!url) return;
+    // Clipboard import: read pasted page source from clipboard
+    const handleClipboardImport = async () => {
         setImportLoading(true);
         setImportError(null);
         setImportSuccess(false);
-
         try {
-            const res = await fetch('/api/admin/fetch-meesho', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url }),
-            });
-            const data = await res.json();
-            if (res.ok && data.success) {
-                setStagedProducts(prev => [...prev, data.product]);
-                setImportUrl('');
-                setImportSuccess(true);
-                setTimeout(() => setImportSuccess(false), 4000);
+            const text = await navigator.clipboard.readText();
+            if (!text || text.length < 500) {
+                setImportError('Clipboard is empty or too short. Copy the full page source first (Ctrl+U → Ctrl+A → Ctrl+C).');
                 setImportLoading(false);
                 return;
             }
-            setImportError(data.error || 'Import failed.');
+            const url = importUrl.trim() || 'https://meesho.com';
+            const product = extractMeeshoProduct(text, url);
+            if (!product) {
+                setImportError('Could not read product from clipboard. Make sure you copied the VIEW SOURCE (Ctrl+U), not the visible text.');
+                setImportLoading(false);
+                return;
+            }
+            if (!await saveProduct(product)) {
+                setImportError('Failed to save product.');
+            }
         } catch {
-            setImportError('Network error. Try the manual fallback below.');
+            setImportError('Clipboard access denied. Use the paste box below instead.');
         }
         setImportLoading(false);
     };
 
+    // Manual paste fallback
     const handleHtmlImport = async () => {
         const html = pasteHtml.trim();
         const url = importUrl.trim() || 'https://meesho.com';
         if (!html) return;
-
         setImportLoading(true);
         setImportError(null);
         setImportSuccess(false);
-
         const product = extractMeeshoProduct(html, url);
         if (!product) {
-            setImportError('Could not read product. Make sure you copied the full page source (Ctrl+A → Ctrl+C).');
+            setImportError('Could not read product. Make sure you copied the full page source.');
             setImportLoading(false);
             return;
         }
-
         if (!await saveProduct(product)) {
             setImportError('Failed to save product.');
         }
@@ -433,70 +429,101 @@ export default function AdminPage() {
                         <div className="flex flex-col gap-6 mb-12">
                             <div>
                                 <h2 className="text-3xl font-extrabold mb-2 tracking-tight" style={{ color: 'var(--foreground)' }}>Catalog Manager</h2>
-                                <p className="text-base font-medium" style={{ color: 'var(--gray-500)' }}>Import products from Meesho in 3 steps.</p>
+                                <p className="text-base font-medium" style={{ color: 'var(--gray-500)' }}>Import products from Meesho with one click.</p>
                             </div>
 
+                            {/* Chrome Extension card */}
                             <div className="bg-white p-5 rounded-3xl shadow-sm border" style={{ borderColor: 'var(--gray-200)' }}>
-                                <p className="text-xs font-bold mb-4 uppercase tracking-wider" style={{ color: 'var(--gray-400)' }}>📦 Import from Meesho</p>
-
-                                {/* Primary: URL auto-import */}
-                                <div className="flex gap-2 mb-3">
-                                    <input
-                                        type="url"
-                                        placeholder="https://meesho.com/product/..."
-                                        value={importUrl}
-                                        onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
-                                        onKeyDown={e => e.key === 'Enter' && handleImport()}
-                                        className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
-                                        style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
-                                        disabled={importLoading}
-                                    />
-                                    <button
-                                        onClick={handleImport}
-                                        disabled={importLoading || !importUrl.trim()}
-                                        className="px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                                        style={{ backgroundColor: 'var(--green)' }}
-                                    >
-                                        {importLoading ? '⏳' : 'Import'}
-                                    </button>
-                                </div>
-
-                                {importLoading && <p className="text-xs mb-2" style={{ color: 'var(--gray-400)' }}>Fetching product details…</p>}
-                                {importSuccess && <p className="text-xs mb-2 font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>}
-
-                                {/* Fallback: paste HTML */}
-                                {importError && (
+                                <div className="flex items-center gap-3 mb-4">
+                                    <span className="text-2xl">🧩</span>
                                     <div>
-                                        <p className="text-xs mb-2 font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
-                                        <details className="mt-2">
-                                            <summary className="text-xs cursor-pointer font-semibold" style={{ color: 'var(--gray-500)' }}>
-                                                Manual fallback — paste page source
-                                            </summary>
-                                            <div className="mt-3">
-                                                <p className="text-xs mb-2" style={{ color: 'var(--gray-500)' }}>
-                                                    Open the product URL, press <kbd className="px-1 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+U</kbd> → <kbd className="px-1 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+A</kbd> → <kbd className="px-1 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+C</kbd>, then paste below.
-                                                </p>
-                                                <textarea
-                                                    placeholder="Paste full page source here…"
-                                                    value={pasteHtml}
-                                                    onChange={e => { setPasteHtml(e.target.value); setImportError(null); }}
-                                                    rows={4}
-                                                    className="w-full px-4 py-3 rounded-2xl text-xs font-mono outline-none resize-none mb-2"
-                                                    style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: '#FAFAFA' }}
-                                                />
-                                                <button
-                                                    onClick={handleHtmlImport}
-                                                    disabled={importLoading || !pasteHtml.trim()}
-                                                    className="w-full py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
-                                                    style={{ backgroundColor: 'var(--accent)' }}
-                                                >
-                                                    Import from pasted source
-                                                </button>
-                                            </div>
-                                        </details>
+                                        <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>Veedu Importer Extension</p>
+                                        <p className="text-xs" style={{ color: 'var(--gray-400)' }}>One-click import from any Meesho product page</p>
                                     </div>
-                                )}
+                                </div>
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+                                    <div className="flex items-start gap-2 p-3 rounded-2xl" style={{ backgroundColor: '#F8F9FA' }}>
+                                        <span className="text-base mt-0.5">1️⃣</span>
+                                        <div>
+                                            <p className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>Download</p>
+                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Get the <code className="text-xs px-1 rounded" style={{ background: '#e2e8f0' }}>extension/</code> folder from the repo</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-start gap-2 p-3 rounded-2xl" style={{ backgroundColor: '#F8F9FA' }}>
+                                        <span className="text-base mt-0.5">2️⃣</span>
+                                        <div>
+                                            <p className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>Install</p>
+                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Chrome → <code className="text-xs px-1 rounded" style={{ background: '#e2e8f0' }}>chrome://extensions</code> → Dev Mode → Load Unpacked</p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-start gap-2 p-3 rounded-2xl" style={{ backgroundColor: '#F0FDF4' }}>
+                                        <span className="text-base mt-0.5">3️⃣</span>
+                                        <div>
+                                            <p className="text-xs font-semibold" style={{ color: 'var(--green)' }}>Import!</p>
+                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Visit any Meesho product → click the green Import button</p>
+                                        </div>
+                                    </div>
+                                </div>
+                                <p className="text-xs" style={{ color: 'var(--gray-400)' }}>
+                                    The extension runs only on meesho.com. It reads the product page and sends data to your Veedu store. No data goes to third parties.
+                                </p>
                             </div>
+
+                            {/* Fallback: Clipboard / Paste import */}
+                            <details className="bg-white rounded-3xl shadow-sm border" style={{ borderColor: 'var(--gray-200)' }}>
+                                <summary className="p-5 cursor-pointer select-none">
+                                    <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--gray-400)' }}>📋 Manual Import (no extension)</span>
+                                </summary>
+                                <div className="px-5 pb-5">
+                                    <div className="mb-4 p-3 rounded-2xl text-xs" style={{ backgroundColor: '#F8F9FA', color: 'var(--gray-500)' }}>
+                                        Open the Meesho product page → press <kbd className="px-1 py-0.5 rounded font-mono" style={{ background: '#e2e8f0' }}>Ctrl+U</kbd> (view source) → <kbd className="px-1 py-0.5 rounded font-mono" style={{ background: '#e2e8f0' }}>Ctrl+A</kbd> → <kbd className="px-1 py-0.5 rounded font-mono" style={{ background: '#e2e8f0' }}>Ctrl+C</kbd>
+                                    </div>
+
+                                    <div className="flex gap-2 mb-3">
+                                        <input
+                                            type="url"
+                                            placeholder="Product URL (optional, for reference)"
+                                            value={importUrl}
+                                            onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
+                                            className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
+                                            style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
+                                            disabled={importLoading}
+                                        />
+                                        <button
+                                            onClick={handleClipboardImport}
+                                            disabled={importLoading}
+                                            className="px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                                            style={{ backgroundColor: 'var(--green)' }}
+                                        >
+                                            {importLoading ? '⏳' : '📋 Import from Clipboard'}
+                                        </button>
+                                    </div>
+
+                                    <details className="mt-2">
+                                        <summary className="text-xs cursor-pointer" style={{ color: 'var(--gray-400)' }}>Or paste manually</summary>
+                                        <textarea
+                                            placeholder="Paste full page source here…"
+                                            value={pasteHtml}
+                                            onChange={e => { setPasteHtml(e.target.value); setImportError(null); }}
+                                            rows={4}
+                                            className="w-full mt-2 px-4 py-3 rounded-2xl text-xs font-mono outline-none resize-none"
+                                            style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: '#FAFAFA' }}
+                                        />
+                                        <button
+                                            onClick={handleHtmlImport}
+                                            disabled={importLoading || !pasteHtml.trim()}
+                                            className="mt-2 w-full py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                                            style={{ backgroundColor: 'var(--accent)' }}
+                                        >
+                                            Import from pasted source
+                                        </button>
+                                    </details>
+
+                                    {importLoading && <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>Importing…</p>}
+                                    {importSuccess && <p className="text-xs mt-2 font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>}
+                                    {importError && <p className="text-xs mt-2 font-medium" style={{ color: '#e53e3e' }}>{importError}</p>}
+                                </div>
+                            </details>
                         </div>
                     </div>
 

@@ -8,7 +8,9 @@ const DATA_FILE = path.join(process.cwd(), 'data', 'products.json');
 
 function setCORSHeaders(res: NextResponse, origin: string) {
     const allowed = ['https://www.meesho.com', 'https://meesho.com'];
-    res.headers.set('Access-Control-Allow-Origin', allowed.includes(origin) ? origin : 'https://www.meesho.com');
+    // Allow Chrome extension origins and Meesho origins
+    const isAllowed = allowed.includes(origin) || origin.startsWith('chrome-extension://');
+    res.headers.set('Access-Control-Allow-Origin', isAllowed ? origin : 'https://www.meesho.com');
     res.headers.set('Access-Control-Allow-Credentials', 'true');
     res.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
     res.headers.set('Access-Control-Allow-Headers', 'Content-Type');
@@ -37,7 +39,7 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
 
         if (!body.url || !body.title || !body.price) {
-            const errRes = NextResponse.json({ error: 'Incomplete data from bookmarklet' }, { status: 400 });
+            const errRes = NextResponse.json({ error: 'Incomplete data — need url, title, and price' }, { status: 400 });
             setCORSHeaders(errRes, origin);
             return errRes;
         }
@@ -48,7 +50,7 @@ export async function POST(req: NextRequest) {
         const newProduct: Product = {
             id: `prod_${crypto.randomUUID()}`,
             title: body.title,
-            description: `High quality ${body.title.toLowerCase()}. Auto-imported from supplier.`,
+            description: body.description || `High quality ${body.title.toLowerCase()}. Auto-imported from supplier.`,
             price: basePrice,
             sellingPrice,
             images: body.images || [],
@@ -56,14 +58,22 @@ export async function POST(req: NextRequest) {
             sourceUrl: body.url,
             status: 'staged',
             isNew: true,
+            inStock: true,
             createdAt: new Date().toISOString(),
         };
 
-        // Persist to products.json
-        const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-        const products: Product[] = JSON.parse(raw);
-        products.push(newProduct);
-        fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2));
+        // Persist to Supabase or local JSON
+        const useSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
+        if (useSupabase) {
+            const { supabase, productToRow } = await import('@/lib/supabase');
+            const { error } = await supabase.from('products').insert(productToRow(newProduct as unknown as Record<string, unknown>));
+            if (error) throw new Error(error.message);
+        } else {
+            const raw = fs.readFileSync(DATA_FILE, 'utf-8');
+            const products: Product[] = JSON.parse(raw);
+            products.push(newProduct);
+            fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2));
+        }
 
         const res = NextResponse.json({ success: true, product: newProduct });
         setCORSHeaders(res, origin);
