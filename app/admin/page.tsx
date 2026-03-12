@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { signOut } from 'next-auth/react';
-import { BOOKMARKLET_CODE } from '@/lib/bookmarklet';
 import { Product } from '@/lib/types';
 
 const sidebarItems = [
@@ -156,7 +155,6 @@ export default function AdminPage() {
     const [importLoading, setImportLoading] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
     const [importSuccess, setImportSuccess] = useState(false);
-    const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // Load staged products from API on mount
     useEffect(() => {
@@ -334,32 +332,6 @@ export default function AdminPage() {
         }
     };
 
-    // Open the Meesho URL in a new tab and poll for new staged products
-    const handleOpenAndPoll = () => {
-        if (!importUrl.trim()) return;
-        window.open(importUrl.trim(), '_blank');
-        // Poll every 4s for up to 2 min — picks up products added via bookmarklet
-        if (pollRef.current) clearInterval(pollRef.current);
-        let attempts = 0;
-        pollRef.current = setInterval(async () => {
-            attempts++;
-            try {
-                const res = await fetch('/api/products?status=staged');
-                if (res.ok) {
-                    const latest: Product[] = await res.json();
-                    if (latest.length > stagedProducts.length) {
-                        setStagedProducts(latest);
-                        setImportUrl('');
-                        setImportSuccess(true);
-                        setTimeout(() => setImportSuccess(false), 4000);
-                        if (pollRef.current) clearInterval(pollRef.current);
-                    }
-                }
-            } catch { /* ignore */ }
-            if (attempts >= 30 && pollRef.current) clearInterval(pollRef.current);
-        }, 4000);
-    };
-
     return (
         <div className="flex min-h-screen" style={{ backgroundColor: 'var(--background)' }}>
             {/* Sidebar Overlay for Mobile */}
@@ -460,72 +432,38 @@ export default function AdminPage() {
                             </div>
 
                             <div className="flex-1 w-full sm:max-w-lg bg-white p-4 rounded-3xl shadow-[var(--shadow-sm)] border">
-                                {/* Step 1: Drag bookmarklet */}
-                                <p className="text-xs font-bold mb-1" style={{ color: 'var(--gray-500)' }}>
+                                <p className="text-xs font-bold mb-3" style={{ color: 'var(--gray-500)' }}>
                                     📦 Import from Meesho
                                 </p>
-                                <div className="flex items-start gap-3 p-3 rounded-2xl mb-3" style={{ backgroundColor: '#F0FAF4', border: '1px solid #C6E8D1' }}>
-                                    <div className="flex-1 text-xs" style={{ color: 'var(--gray-600)' }}>
-                                        <span className="font-bold" style={{ color: 'var(--green)' }}>Step 1</span> — drag this to your bookmarks bar <span className="opacity-60">(one-time setup)</span>
-                                    </div>
-                                    <a
-                                        href={BOOKMARKLET_CODE}
-                                        draggable
-                                        className="shrink-0 px-4 py-2 rounded-full text-xs font-bold text-white cursor-grab active:cursor-grabbing select-none"
-                                        style={{ backgroundColor: 'var(--green)', whiteSpace: 'nowrap' }}
-                                        onClick={e => { e.preventDefault(); alert('Drag this button to your browser\'s bookmarks bar first, then click it on any Meesho product page.'); }}
-                                    >
-                                        🔖 Veedu Importer ✦
-                                    </a>
-                                </div>
-
-                                {/* Step 2: paste URL + open */}
-                                <div className="text-xs mb-2" style={{ color: 'var(--gray-500)' }}>
-                                    <span className="font-bold" style={{ color: 'var(--accent)' }}>Step 2</span> — paste a Meesho product URL and open it:
-                                </div>
                                 <div className="flex gap-2">
                                     <input
                                         type="url"
                                         placeholder="https://meesho.com/product/..."
                                         value={importUrl}
                                         onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
-                                        onKeyDown={e => e.key === 'Enter' && handleOpenAndPoll()}
+                                        onKeyDown={e => e.key === 'Enter' && handleImport()}
                                         className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
                                         style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
                                         disabled={importLoading}
                                     />
                                     <button
-                                        onClick={handleOpenAndPoll}
-                                        disabled={!importUrl.trim()}
+                                        onClick={handleImport}
+                                        disabled={importLoading || !importUrl.trim()}
                                         className="px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                                        style={{ backgroundColor: 'var(--accent)' }}
+                                        style={{ backgroundColor: 'var(--green)' }}
                                     >
-                                        Open ↗
+                                        {importLoading ? '⏳' : 'Import'}
                                     </button>
                                 </div>
-
-                                <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>
-                                    <span className="font-semibold" style={{ color: 'var(--green)' }}>Step 3</span> — on the Meesho page, click <strong>Veedu Importer ✦</strong> in your bookmarks. This page auto-updates.
-                                </p>
-
+                                {importLoading && (
+                                    <p className="text-xs mt-2" style={{ color: 'var(--gray-400)' }}>Fetching product details…</p>
+                                )}
                                 {importSuccess && (
                                     <p className="text-xs mt-2 font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>
                                 )}
                                 {importError && (
                                     <p className="text-xs mt-2 font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
                                 )}
-
-                                {/* Auto-import as secondary option */}
-                                <div className="mt-3 pt-3" style={{ borderTop: '1px solid var(--gray-100)' }}>
-                                    <button
-                                        onClick={handleImport}
-                                        disabled={importLoading || !importUrl.trim()}
-                                        className="text-xs font-medium transition-all hover:underline disabled:opacity-40 disabled:cursor-not-allowed"
-                                        style={{ color: 'var(--gray-400)' }}
-                                    >
-                                        {importLoading ? '⏳ Trying auto-import…' : 'Or try auto-import (may be blocked by Meesho)'}
-                                    </button>
-                                </div>
                             </div>
                         </div>
                     </div>
