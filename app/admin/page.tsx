@@ -266,6 +266,58 @@ export default function AdminPage() {
         }
     };
 
+    const saveProduct = async (product: ReturnType<typeof extractMeeshoProduct>) => {
+        if (!product) return false;
+        const res = await fetch('/api/admin/scrape-meesho', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(product),
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            setStagedProducts(prev => [...prev, data.product]);
+            setImportUrl('');
+            setPasteHtml('');
+            setImportSuccess(true);
+            setTimeout(() => setImportSuccess(false), 4000);
+            return true;
+        }
+        return false;
+    };
+
+    // Primary: fetch via free public CORS proxy (browser-side, no extra setup)
+    const handleImport = async () => {
+        const url = importUrl.trim();
+        if (!url) return;
+        setImportLoading(true);
+        setImportError(null);
+        setImportSuccess(false);
+
+        const proxies = [
+            `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+            `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+        ];
+
+        for (const proxyUrl of proxies) {
+            try {
+                const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+                if (!res.ok) continue;
+                const json = await res.json();
+                // allorigins wraps in { contents: "..." }, corsproxy returns text directly
+                const html: string = json.contents ?? json;
+                if (typeof html !== 'string' || html.length < 5000) continue;
+                const product = extractMeeshoProduct(html, url);
+                if (product && await saveProduct(product)) {
+                    setImportLoading(false);
+                    return;
+                }
+            } catch { /* try next */ }
+        }
+
+        setImportError('Auto-fetch failed. Paste the page source below instead.');
+        setImportLoading(false);
+    };
+
     const handleHtmlImport = async () => {
         const html = pasteHtml.trim();
         const url = importUrl.trim() || 'https://meesho.com';
@@ -277,32 +329,15 @@ export default function AdminPage() {
 
         const product = extractMeeshoProduct(html, url);
         if (!product) {
-            setImportError('Could not read product from the pasted source. Make sure you copied the full page (Ctrl+A → Ctrl+C).');
+            setImportError('Could not read product. Make sure you copied the full page source (Ctrl+A → Ctrl+C).');
             setImportLoading(false);
             return;
         }
 
-        try {
-            const res = await fetch('/api/admin/scrape-meesho', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(product),
-            });
-            const data = await res.json();
-            if (res.ok && data.success) {
-                setStagedProducts(prev => [...prev, data.product]);
-                setImportUrl('');
-                setPasteHtml('');
-                setImportSuccess(true);
-                setTimeout(() => setImportSuccess(false), 4000);
-            } else {
-                setImportError(data.error || 'Failed to save product');
-            }
-        } catch {
-            setImportError('Network error. Please try again.');
-        } finally {
-            setImportLoading(false);
+        if (!await saveProduct(product)) {
+            setImportError('Failed to save product.');
         }
+        setImportLoading(false);
     };
 
     return (
@@ -407,65 +442,62 @@ export default function AdminPage() {
                             <div className="bg-white p-5 rounded-3xl shadow-sm border" style={{ borderColor: 'var(--gray-200)' }}>
                                 <p className="text-xs font-bold mb-4 uppercase tracking-wider" style={{ color: 'var(--gray-400)' }}>📦 Import from Meesho</p>
 
-                                {/* Step 1 */}
-                                <div className="mb-4">
-                                    <p className="text-sm font-semibold mb-2" style={{ color: 'var(--foreground)' }}>1. Open the product page</p>
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="url"
-                                            placeholder="https://meesho.com/product/..."
-                                            value={importUrl}
-                                            onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
-                                            className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
-                                            style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
-                                            disabled={importLoading}
-                                        />
-                                        <button
-                                            onClick={() => importUrl.trim() && window.open(importUrl.trim(), '_blank')}
-                                            disabled={!importUrl.trim()}
-                                            className="px-5 py-2.5 rounded-full text-sm font-bold transition-all hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed"
-                                            style={{ backgroundColor: 'var(--gray-100)', color: 'var(--foreground)', border: '1px solid var(--gray-200)' }}
-                                        >
-                                            Open ↗
-                                        </button>
-                                    </div>
-                                </div>
-
-                                {/* Step 2 */}
-                                <div className="mb-4 px-4 py-3 rounded-2xl" style={{ backgroundColor: '#F8F9FA' }}>
-                                    <p className="text-sm font-semibold mb-1" style={{ color: 'var(--foreground)' }}>2. Copy the page source</p>
-                                    <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-                                        On the opened page press <kbd className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+U</kbd> to view source, then <kbd className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+A</kbd> → <kbd className="px-1.5 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+C</kbd> to copy all.
-                                    </p>
-                                </div>
-
-                                {/* Step 3 */}
-                                <div className="mb-4">
-                                    <p className="text-sm font-semibold mb-2" style={{ color: 'var(--foreground)' }}>3. Paste &amp; Import</p>
-                                    <textarea
-                                        placeholder="Paste the page source here (Ctrl+V)…"
-                                        value={pasteHtml}
-                                        onChange={e => { setPasteHtml(e.target.value); setImportError(null); }}
-                                        rows={4}
-                                        className="w-full px-4 py-3 rounded-2xl text-xs font-mono outline-none resize-none"
-                                        style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: '#FAFAFA' }}
+                                {/* Primary: URL auto-import */}
+                                <div className="flex gap-2 mb-3">
+                                    <input
+                                        type="url"
+                                        placeholder="https://meesho.com/product/..."
+                                        value={importUrl}
+                                        onChange={e => { setImportUrl(e.target.value); setImportError(null); }}
+                                        onKeyDown={e => e.key === 'Enter' && handleImport()}
+                                        className="flex-1 px-4 py-2.5 rounded-full text-sm outline-none"
+                                        style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)' }}
                                         disabled={importLoading}
                                     />
                                     <button
-                                        onClick={handleHtmlImport}
-                                        disabled={importLoading || !pasteHtml.trim()}
-                                        className="mt-2 w-full py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                                        onClick={handleImport}
+                                        disabled={importLoading || !importUrl.trim()}
+                                        className="px-5 py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                                         style={{ backgroundColor: 'var(--green)' }}
                                     >
-                                        {importLoading ? '⏳ Importing…' : 'Import Product'}
+                                        {importLoading ? '⏳' : 'Import'}
                                     </button>
                                 </div>
 
-                                {importSuccess && (
-                                    <p className="text-xs font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>
-                                )}
+                                {importLoading && <p className="text-xs mb-2" style={{ color: 'var(--gray-400)' }}>Fetching product details…</p>}
+                                {importSuccess && <p className="text-xs mb-2 font-medium" style={{ color: 'var(--green)' }}>✓ Product added to staged items!</p>}
+
+                                {/* Fallback: paste HTML */}
                                 {importError && (
-                                    <p className="text-xs font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
+                                    <div>
+                                        <p className="text-xs mb-2 font-medium" style={{ color: '#e53e3e' }}>{importError}</p>
+                                        <details className="mt-2">
+                                            <summary className="text-xs cursor-pointer font-semibold" style={{ color: 'var(--gray-500)' }}>
+                                                Manual fallback — paste page source
+                                            </summary>
+                                            <div className="mt-3">
+                                                <p className="text-xs mb-2" style={{ color: 'var(--gray-500)' }}>
+                                                    Open the product URL, press <kbd className="px-1 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+U</kbd> → <kbd className="px-1 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+A</kbd> → <kbd className="px-1 py-0.5 rounded text-xs font-mono" style={{ background: '#e2e8f0' }}>Ctrl+C</kbd>, then paste below.
+                                                </p>
+                                                <textarea
+                                                    placeholder="Paste full page source here…"
+                                                    value={pasteHtml}
+                                                    onChange={e => { setPasteHtml(e.target.value); setImportError(null); }}
+                                                    rows={4}
+                                                    className="w-full px-4 py-3 rounded-2xl text-xs font-mono outline-none resize-none mb-2"
+                                                    style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: '#FAFAFA' }}
+                                                />
+                                                <button
+                                                    onClick={handleHtmlImport}
+                                                    disabled={importLoading || !pasteHtml.trim()}
+                                                    className="w-full py-2.5 rounded-full text-sm font-bold text-white transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                    style={{ backgroundColor: 'var(--accent)' }}
+                                                >
+                                                    Import from pasted source
+                                                </button>
+                                            </div>
+                                        </details>
+                                    </div>
                                 )}
                             </div>
                         </div>
