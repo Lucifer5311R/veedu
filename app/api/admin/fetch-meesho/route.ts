@@ -63,13 +63,19 @@ function cleanImages(urls: string[]): string[] {
  */
 async function fetchViaScraperAPI(url: string): Promise<MeeshoProductData | null> {
     const apiKey = process.env.SCRAPERAPI_KEY;
-    if (!apiKey) return null;
+    if (!apiKey) {
+        console.log('[Meesho/ScraperAPI] No SCRAPERAPI_KEY set');
+        return null;
+    }
 
     try {
+        console.log('[Meesho/ScraperAPI] Trying with key:', apiKey.slice(0, 6) + '...');
         const scraperUrl = `https://api.scraperapi.com?api_key=${apiKey}&url=${encodeURIComponent(url)}&render=false`;
         const res = await fetch(scraperUrl, { signal: AbortSignal.timeout(30000) });
+        console.log('[Meesho/ScraperAPI] Response status:', res.status);
         if (!res.ok) {
-            console.warn('[Meesho/ScraperAPI] Failed:', res.status);
+            const body = await res.text().catch(() => '');
+            console.warn('[Meesho/ScraperAPI] Failed:', res.status, body.slice(0, 200));
             return null;
         }
         const html = await res.text();
@@ -409,8 +415,16 @@ export async function POST(req: NextRequest) {
         }
 
         if (!productData || !productData.title || !productData.price) {
+            const hasScraperKey = !!process.env.SCRAPERAPI_KEY;
+            const hasCFProxy = !!(process.env.CF_PROXY_URL || process.env.NEXT_PUBLIC_CF_PROXY_URL);
             return NextResponse.json(
-                { error: 'Could not fetch product. Add SCRAPERAPI_KEY to Vercel env vars (free at scraperapi.com) to enable auto-import.' },
+                {
+                    error: hasScraperKey
+                        ? 'ScraperAPI returned data but product info could not be extracted. Check Vercel logs.'
+                        : hasCFProxy
+                        ? 'CF proxy configured but product could not be extracted. Check Vercel logs.'
+                        : 'No proxy configured. Add SCRAPERAPI_KEY to Vercel env vars (free at scraperapi.com), then redeploy.',
+                },
                 { status: 422 }
             );
         }
