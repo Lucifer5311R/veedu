@@ -66,7 +66,7 @@ export default function CheckoutPage() {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    items: items.map(i => ({ productId: i.product.id, title: i.product.title, price: i.product.sellingPrice, quantity: i.quantity, image: i.product.images?.[0] || '' })),
+                    items: items.map(i => ({ product: i.product, quantity: i.quantity })),
                     total,
                     customer: { name: form.name, phone: form.phone, address: form.address, city: form.city, pincode: form.pincode, state: 'Kerala' },
                 }),

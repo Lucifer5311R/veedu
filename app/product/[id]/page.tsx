@@ -343,6 +343,12 @@ export default function ProductDetailPage() {
                                                         {review.name.charAt(0).toUpperCase()}
                                                     </div>
                                                     <span className="text-sm font-semibold" style={{ color: 'var(--foreground)' }}>{review.name}</span>
+                                                    {review.verifiedPurchase && (
+                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" 
+                                                              style={{ backgroundColor: 'var(--green-light)', color: 'var(--green)' }}>
+                                                            ✓ Verified Purchase
+                                                        </span>
+                                                    )}
                                                 </div>
                                                 <span className="text-xs" style={{ color: 'var(--gray-400)' }}>{new Date(review.createdAt).toLocaleDateString()}</span>
                                             </div>

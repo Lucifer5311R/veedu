@@ -5,6 +5,7 @@ import { Review } from '@/lib/types';
 import { auth } from '@/auth';
 
 const DATA_FILE = path.join(process.cwd(), 'data', 'reviews.json');
+const ORDERS_FILE = path.join(process.cwd(), 'data', 'orders.json');
 const useSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_KEY);
 
 // ─── JSON fallback (dev without Supabase) ─────────────────────────────────────
@@ -21,6 +22,14 @@ function writeReviews(reviews: Review[]) {
     fs.writeFileSync(DATA_FILE, JSON.stringify(reviews, null, 2));
 }
 
+function readOrders(): { items?: { product?: { id?: string }; productId?: string }[] }[] {
+    try {
+        return JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf-8'));
+    } catch {
+        return [];
+    }
+}
+
 // ─── Supabase helpers ─────────────────────────────────────────────────────────
 async function getSupabase() {
     const { supabase } = await import('@/lib/supabase');
@@ -35,6 +44,7 @@ function rowToReview(row: Record<string, unknown>): Review {
         rating: row.rating as number,
         comment: row.comment as string,
         approved: row.approved as boolean,
+        verifiedPurchase: (row.verified_purchase ?? row.verifiedPurchase) as boolean | undefined,
         createdAt: (row.created_at ?? row.createdAt) as string,
     };
 }
@@ -44,6 +54,10 @@ function reviewToRow(review: Partial<Review>) {
     if ('productId' in review) {
         row.product_id = review.productId;
         delete row.productId;
+    }
+    if ('verifiedPurchase' in review) {
+        row.verified_purchase = review.verifiedPurchase;
+        delete row.verifiedPurchase;
     }
     if ('createdAt' in review) {
         row.created_at = review.createdAt;
@@ -114,6 +128,27 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: 'Rating must be between 1 and 5' }, { status: 400 });
         }
 
+        // Check if reviewer has purchased this product
+        let verifiedPurchase = false;
+        if (useSupabase) {
+            try {
+                const supabase = await getSupabase();
+                const { data: ordersData } = await supabase
+                    .from('orders')
+                    .select('items');
+                if (ordersData) {
+                    verifiedPurchase = ordersData.some((order: { items?: { product?: { id?: string }; productId?: string }[] }) =>
+                        order.items?.some(item => (item.product?.id ?? item.productId) === productId)
+                    );
+                }
+            } catch { /* fallback to false */ }
+        } else {
+            const orders = readOrders();
+            verifiedPurchase = orders.some(order =>
+                order.items?.some(item => (item.product?.id ?? item.productId) === productId)
+            );
+        }
+
         const newReview: Review = {
             id: `rev_${crypto.randomUUID()}`,
             productId,
@@ -121,6 +156,7 @@ export async function POST(req: NextRequest) {
             rating,
             comment: String(comment).trim(),
             approved: false,
+            verifiedPurchase,
             createdAt: new Date().toISOString(),
         };
 

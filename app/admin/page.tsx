@@ -3,19 +3,17 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { signOut } from 'next-auth/react';
-import { Product, Order, Review } from '@/lib/types';
+import { Product, Order, Review, CartItem } from '@/lib/types';
 
-const sidebarItems: { label: string; icon: string; view?: 'catalog' | 'orders' | 'reviews' }[] = [
-    { label: 'Dashboard', icon: 'grid', view: 'catalog' },
+const sidebarItems: { label: string; icon: string; view?: 'dashboard' | 'catalog' | 'orders' | 'reviews' | 'insights' }[] = [
+    { label: 'Dashboard', icon: 'grid', view: 'dashboard' },
     { label: 'Catalog', icon: 'box', view: 'catalog' },
     { label: 'Orders', icon: 'clipboard', view: 'orders' },
     { label: 'Reviews', icon: 'star', view: 'reviews' },
-    { label: 'Resellers', icon: 'users' },
+    { label: 'Insights', icon: 'chart', view: 'insights' },
 ];
 
-const reportItems = [
-    { label: 'Insights', icon: 'chart', active: false },
-];
+const reportItems: { label: string; icon: string }[] = [];
 
 const PRODUCT_CATEGORIES = ['Kitchen', 'Laundry', 'Home & Bath', 'Organization'];
 
@@ -163,17 +161,25 @@ export default function AdminPage() {
     const [importLoading, setImportLoading] = useState(false);
     const [importError, setImportError] = useState<string | null>(null);
     const [importSuccess, setImportSuccess] = useState(false);
-    const [activeView, setActiveView] = useState<'catalog' | 'orders' | 'reviews'>('catalog');
+    const [activeView, setActiveView] = useState<'dashboard' | 'catalog' | 'orders' | 'reviews' | 'insights'>('dashboard');
 
     // Orders state
     const [orders, setOrders] = useState<Order[]>([]);
     const [ordersLoading, setOrdersLoading] = useState(false);
     const [orderStatusFilter, setOrderStatusFilter] = useState<string>('all');
     const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+    const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
+    const [orderError, setOrderError] = useState<string | null>(null);
 
     // Reviews state
     const [reviews, setReviews] = useState<Review[]>([]);
     const [reviewsLoading, setReviewsLoading] = useState(false);
+    const [reviewActionId, setReviewActionId] = useState<string | null>(null);
+
+    // Dashboard stats
+    const [allProducts, setAllProducts] = useState<Product[]>([]);
+    const [allOrders, setAllOrders] = useState<Order[]>([]);
+    const [allReviews, setAllReviews] = useState<Review[]>([]);
 
     // Load staged products from API on mount
     useEffect(() => {
@@ -194,6 +200,7 @@ export default function AdminPage() {
                 if (res.ok) {
                     const data: Product[] = await res.json();
                     setPublishedCount(data.length);
+                    setAllProducts(data);
                     const cats: Record<string, number> = {};
                     for (const p of data) {
                         cats[p.category] = (cats[p.category] || 0) + 1;
@@ -204,8 +211,21 @@ export default function AdminPage() {
                 console.error('Failed to load published products:', err);
             }
         };
+        const loadDashboardData = async () => {
+            try {
+                const [ordersRes, reviewsRes] = await Promise.all([
+                    fetch('/api/orders'),
+                    fetch('/api/reviews'),
+                ]);
+                if (ordersRes.ok) { const d = await ordersRes.json(); setAllOrders(Array.isArray(d) ? d : d.orders || []); }
+                if (reviewsRes.ok) { const d = await reviewsRes.json(); setAllReviews(Array.isArray(d) ? d : d.reviews || []); }
+            } catch (err) {
+                console.error('Failed to load dashboard data:', err);
+            }
+        };
         loadStaged();
         loadPublished();
+        loadDashboardData();
     }, []);
 
     // Fetch orders when switching to orders view
@@ -213,14 +233,19 @@ export default function AdminPage() {
         if (activeView !== 'orders') return;
         const loadOrders = async () => {
             setOrdersLoading(true);
+            setOrderError(null);
             try {
                 const res = await fetch('/api/orders');
                 if (res.ok) {
                     const data = await res.json();
-                    setOrders(Array.isArray(data) ? data : data.orders || []);
+                    const list = Array.isArray(data) ? data : data.orders || [];
+                    setOrders(list);
+                    setAllOrders(list);
+                } else {
+                    setOrderError('Failed to load orders. Please refresh.');
                 }
-            } catch (err) {
-                console.error('Failed to load orders:', err);
+            } catch {
+                setOrderError('Network error loading orders.');
             } finally {
                 setOrdersLoading(false);
             }
@@ -237,7 +262,9 @@ export default function AdminPage() {
                 const res = await fetch('/api/reviews');
                 if (res.ok) {
                     const data = await res.json();
-                    setReviews(Array.isArray(data) ? data : data.reviews || []);
+                    const list = Array.isArray(data) ? data : data.reviews || [];
+                    setReviews(list);
+                    setAllReviews(list);
                 }
             } catch (err) {
                 console.error('Failed to load reviews:', err);
@@ -249,21 +276,32 @@ export default function AdminPage() {
     }, [activeView]);
 
     const handleOrderStatusChange = async (orderId: string, newStatus: string) => {
+        const prev = orders.find(o => o.id === orderId)?.status;
+        setUpdatingOrderId(orderId);
+        setOrderError(null);
+        // Optimistic update
+        setOrders(o => o.map(x => x.id === orderId ? { ...x, status: newStatus as Order['status'] } : x));
         try {
             const res = await fetch('/api/orders', {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ id: orderId, status: newStatus }),
             });
-            if (res.ok) {
-                setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus as Order['status'] } : o));
+            if (!res.ok) {
+                // Rollback
+                if (prev) setOrders(o => o.map(x => x.id === orderId ? { ...x, status: prev } : x));
+                setOrderError(`Failed to update order #${orderId.slice(0, 8)}`);
             }
-        } catch (err) {
-            console.error('Failed to update order status:', err);
+        } catch {
+            if (prev) setOrders(o => o.map(x => x.id === orderId ? { ...x, status: prev } : x));
+            setOrderError('Network error updating order.');
+        } finally {
+            setUpdatingOrderId(null);
         }
     };
 
     const handleApproveReview = async (reviewId: string) => {
+        setReviewActionId(reviewId);
         try {
             const res = await fetch('/api/reviews', {
                 method: 'PATCH',
@@ -275,10 +313,13 @@ export default function AdminPage() {
             }
         } catch (err) {
             console.error('Failed to approve review:', err);
+        } finally {
+            setReviewActionId(null);
         }
     };
 
     const handleDeleteReview = async (reviewId: string) => {
+        setReviewActionId(reviewId);
         try {
             const res = await fetch(`/api/reviews?id=${reviewId}`, {
                 method: 'DELETE',
@@ -288,6 +329,8 @@ export default function AdminPage() {
             }
         } catch (err) {
             console.error('Failed to delete review:', err);
+        } finally {
+            setReviewActionId(null);
         }
     };
 
@@ -548,18 +591,6 @@ export default function AdminPage() {
                         </nav>
                     </div>
 
-                    <div className="px-4 mt-8">
-                        <p className="px-3 text-[10px] font-semibold tracking-widest uppercase mb-3" style={{ color: 'var(--gray-400)' }}>Reports</p>
-                        <nav className="space-y-1">
-                            {reportItems.map(item => (
-                                <button key={item.label} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors"
-                                    style={{ color: 'var(--gray-600)' }}>
-                                    <SidebarIcon type={item.icon} />{item.label}
-                                </button>
-                            ))}
-                        </nav>
-                    </div>
-
                     <div className="mt-auto px-4 pb-6">
                         <div className="mb-4 px-4 py-3 rounded-xl" style={{ backgroundColor: '#FFF8F3', border: '1px solid #FFE8D6' }}>
                             <p className="text-xs font-bold" style={{ color: 'var(--accent)' }}>Kerala Delivery</p>
@@ -592,7 +623,7 @@ export default function AdminPage() {
                             </svg>
                         </button>
                         <h1 className="text-lg font-semibold" style={{ color: 'var(--foreground)' }}>
-                            {activeView === 'catalog' ? 'Catalog Manager' : activeView === 'orders' ? 'Order Management' : 'Review Moderation'}
+                            {activeView === 'dashboard' ? 'Dashboard' : activeView === 'catalog' ? 'Catalog Manager' : activeView === 'orders' ? 'Order Management' : activeView === 'insights' ? 'Insights' : 'Review Moderation'}
                         </h1>
                     </div>
                     <div className="flex items-center gap-4">
@@ -607,6 +638,124 @@ export default function AdminPage() {
                 </header>
 
                 <div className="flex-1 p-6 lg:p-10" style={{ backgroundColor: '#FAF8F5' }}>
+                    {/* Dashboard View */}
+                    {activeView === 'dashboard' && (
+                        <div className="max-w-7xl mx-auto">
+                            <div className="mb-8">
+                                <h2 className="text-3xl font-extrabold mb-2 tracking-tight" style={{ color: 'var(--foreground)' }}>Dashboard</h2>
+                                <p className="text-base font-medium" style={{ color: 'var(--gray-500)' }}>Overview of your store performance.</p>
+                            </div>
+
+                            {/* Stats Cards */}
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                                {[
+                                    { label: 'Products', value: publishedCount, icon: '📦', color: 'var(--accent)' },
+                                    { label: 'Orders', value: allOrders.length, icon: '🛒', color: 'var(--green)' },
+                                    { label: 'Revenue', value: `₹${allOrders.reduce((s, o) => s + (o.total || 0), 0).toLocaleString('en-IN')}`, icon: '💰', color: '#2563EB' },
+                                    { label: 'Reviews', value: allReviews.length, icon: '⭐', color: '#D97706' },
+                                ].map(stat => (
+                                    <div key={stat.label} className="bg-white rounded-2xl p-5" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                        <div className="flex items-center justify-between mb-3">
+                                            <span className="text-2xl">{stat.icon}</span>
+                                            <span className="text-[10px] font-bold px-2 py-1 rounded-full" style={{ backgroundColor: stat.color + '18', color: stat.color }}>Live</span>
+                                        </div>
+                                        <p className="text-2xl font-extrabold tracking-tight" style={{ color: 'var(--foreground)' }}>{stat.value}</p>
+                                        <p className="text-xs font-medium mt-1" style={{ color: 'var(--gray-400)' }}>{stat.label}</p>
+                                    </div>
+                                ))}
+                            </div>
+
+                            {/* Order Status Breakdown */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+                                <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                    <h3 className="text-sm font-bold mb-4" style={{ color: 'var(--foreground)' }}>Order Status</h3>
+                                    <div className="space-y-3">
+                                        {(['pending', 'paid', 'shipped', 'delivered'] as const).map(status => {
+                                            const count = allOrders.filter(o => o.status === status).length;
+                                            const pct = allOrders.length > 0 ? (count / allOrders.length) * 100 : 0;
+                                            return (
+                                                <div key={status}>
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className="text-xs font-semibold capitalize" style={{ color: 'var(--gray-600)' }}>{status}</span>
+                                                        <span className="text-xs font-bold" style={{ color: 'var(--foreground)' }}>{count}</span>
+                                                    </div>
+                                                    <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--gray-100)' }}>
+                                                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: statusBadgeStyle(status).color }} />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+
+                                <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                    <h3 className="text-sm font-bold mb-4" style={{ color: 'var(--foreground)' }}>Category Breakdown</h3>
+                                    <div className="space-y-3">
+                                        {Object.entries(categoryBreakdown).map(([cat, count]) => {
+                                            const pct = publishedCount > 0 ? (count / publishedCount) * 100 : 0;
+                                            return (
+                                                <div key={cat}>
+                                                    <div className="flex items-center justify-between mb-1">
+                                                        <span className="text-xs font-semibold" style={{ color: 'var(--gray-600)' }}>{cat}</span>
+                                                        <span className="text-xs font-bold" style={{ color: 'var(--foreground)' }}>{count}</span>
+                                                    </div>
+                                                    <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--gray-100)' }}>
+                                                        <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: 'var(--accent)' }} />
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        {Object.keys(categoryBreakdown).length === 0 && (
+                                            <p className="text-xs py-4 text-center" style={{ color: 'var(--gray-400)' }}>No products published yet.</p>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Recent Orders */}
+                            <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                <div className="flex items-center justify-between mb-4">
+                                    <h3 className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>Recent Orders</h3>
+                                    <button onClick={() => setActiveView('orders')} className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>View All →</button>
+                                </div>
+                                {allOrders.length === 0 ? (
+                                    <p className="text-xs py-6 text-center" style={{ color: 'var(--gray-400)' }}>No orders yet.</p>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {allOrders.slice(0, 5).map(order => (
+                                            <div key={order.id} className="flex items-center justify-between py-2 px-3 rounded-xl" style={{ backgroundColor: 'var(--gray-100)' }}>
+                                                <div className="flex items-center gap-3">
+                                                    <p className="text-xs font-bold" style={{ color: 'var(--foreground)' }}>#{order.id.slice(0, 12)}</p>
+                                                    <p className="text-xs" style={{ color: 'var(--gray-500)' }}>{order.customer?.name || 'Unknown'}</p>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>₹{(order.total || 0).toLocaleString('en-IN')}</p>
+                                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={statusBadgeStyle(order.status)}>
+                                                        {order.status?.charAt(0).toUpperCase() + order.status?.slice(1)}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Pending Reviews */}
+                            {allReviews.filter(r => !r.approved).length > 0 && (
+                                <div className="bg-white rounded-2xl p-6 mt-6" style={{ border: '1px solid #FEF3C7', boxShadow: 'var(--shadow-sm)' }}>
+                                    <div className="flex items-center justify-between mb-2">
+                                        <h3 className="text-sm font-bold" style={{ color: '#D97706' }}>⚠ Pending Reviews</h3>
+                                        <button onClick={() => setActiveView('reviews')} className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>Moderate →</button>
+                                    </div>
+                                    <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
+                                        {allReviews.filter(r => !r.approved).length} review{allReviews.filter(r => !r.approved).length !== 1 ? 's' : ''} waiting for approval.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Catalog View */}
                     {activeView === 'catalog' && (<>
                     <div className="max-w-7xl mx-auto">
                         <div className="flex flex-col gap-6 mb-12">
@@ -793,6 +942,24 @@ export default function AdminPage() {
                                 </select>
                             </div>
 
+                            {/* Order count + error banner */}
+                            {!ordersLoading && orders.length > 0 && (
+                                <div className="flex items-center gap-4 mb-4">
+                                    <span className="text-xs font-bold px-3 py-1.5 rounded-full" style={{ backgroundColor: 'var(--green-light)', color: 'var(--green)' }}>
+                                        {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}
+                                    </span>
+                                    <span className="text-xs" style={{ color: 'var(--gray-400)' }}>
+                                        Revenue: ₹{filteredOrders.reduce((s, o) => s + (o.total || 0), 0).toLocaleString('en-IN')}
+                                    </span>
+                                </div>
+                            )}
+                            {orderError && (
+                                <div className="mb-4 px-4 py-3 rounded-xl flex items-center justify-between" style={{ backgroundColor: '#FEE2E2', border: '1px solid #FECACA' }}>
+                                    <p className="text-xs font-semibold" style={{ color: '#DC2626' }}>{orderError}</p>
+                                    <button onClick={() => setOrderError(null)} className="text-xs font-bold" style={{ color: '#DC2626' }}>✕</button>
+                                </div>
+                            )}
+
                             {ordersLoading ? (
                                 <div className="text-center py-20">
                                     <p className="text-sm" style={{ color: 'var(--gray-400)' }}>Loading orders...</p>
@@ -825,10 +992,11 @@ export default function AdminPage() {
                                                     </span>
                                                     <select
                                                         value={order.status}
+                                                        disabled={updatingOrderId === order.id}
                                                         onChange={e => { e.stopPropagation(); handleOrderStatusChange(order.id, e.target.value); }}
                                                         onClick={e => e.stopPropagation()}
-                                                        className="text-xs px-2 py-1 rounded-lg outline-none"
-                                                        style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: 'var(--white)' }}
+                                                        className="text-xs px-2 py-1 rounded-lg outline-none disabled:opacity-50"
+                                                        style={{ border: '1px solid var(--gray-200)', color: 'var(--foreground)', backgroundColor: updatingOrderId === order.id ? 'var(--gray-100)' : 'var(--white)' }}
                                                     >
                                                         <option value="pending">Pending</option>
                                                         <option value="paid">Paid</option>
@@ -845,23 +1013,31 @@ export default function AdminPage() {
                                                 <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--gray-200)' }}>
                                                     <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--gray-400)' }}>Order Items</p>
                                                     <div className="space-y-2">
-                                                        {order.items.map((item, i) => (
-                                                            <div key={i} className="flex items-center gap-3 p-2 rounded-xl" style={{ backgroundColor: 'var(--gray-100)' }}>
-                                                                {item.product.images?.[0] && (
-                                                                    <img src={item.product.images[0]} alt={item.product.title} className="w-10 h-10 rounded-lg object-cover" />
-                                                                )}
-                                                                <div className="flex-1 min-w-0">
-                                                                    <p className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>{item.product.title}</p>
-                                                                    <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Qty: {item.quantity} × ₹{item.product.sellingPrice}</p>
+                                                        {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                                                        {(order.items as any[] || []).map((item: any, i: number) => {
+                                                            // Handle both CartItem format {product, quantity} and flat format {productId, title, price, quantity, image}
+                                                            const prod = (item.product || {}) as Record<string, unknown>;
+                                                            const title = (prod.title || item.title || 'Unknown Product') as string;
+                                                            const price = (prod.sellingPrice || item.price || 0) as number;
+                                                            const qty = (item.quantity || 1) as number;
+                                                            const img = ((prod.images as string[])?.[0] || item.image || '') as string;
+                                                            return (
+                                                                <div key={i} className="flex items-center gap-3 p-2 rounded-xl" style={{ backgroundColor: 'var(--gray-100)' }}>
+                                                                    {img && <img src={img} alt={title} className="w-10 h-10 rounded-lg object-cover" />}
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>{title}</p>
+                                                                        <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Qty: {qty} × ₹{price}</p>
+                                                                    </div>
+                                                                    <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>₹{qty * price}</p>
                                                                 </div>
-                                                                <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>₹{item.quantity * item.product.sellingPrice}</p>
-                                                            </div>
-                                                        ))}
+                                                            );
+                                                        })}
                                                     </div>
-                                                    <div className="mt-3 text-right">
+                                                    <div className="mt-3 flex items-center justify-between">
                                                         <p className="text-xs" style={{ color: 'var(--gray-500)' }}>
-                                                            {order.customer.address}, {order.customer.city}, {order.customer.state} - {order.customer.pincode}
+                                                            {order.customer?.address}, {order.customer?.city}, {order.customer?.state} - {order.customer?.pincode}
                                                         </p>
+                                                        <p className="text-sm font-extrabold" style={{ color: 'var(--foreground)' }}>Total: ₹{(order.total || 0).toLocaleString('en-IN')}</p>
                                                     </div>
                                                 </div>
                                             )}
@@ -894,7 +1070,12 @@ export default function AdminPage() {
                                     {reviews.map(review => (
                                         <div key={review.id} className="bg-white rounded-2xl p-5" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
                                             <div className="flex items-center justify-between mb-3">
-                                                <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>{review.name}</p>
+                                                <div className="flex items-center gap-2">
+                                                    <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>{review.name}</p>
+                                                    {review.verifiedPurchase && (
+                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: 'var(--green-light)', color: 'var(--green)' }}>✓ Verified</span>
+                                                    )}
+                                                </div>
                                                 <p className="text-xs" style={{ color: 'var(--gray-400)' }}>{new Date(review.createdAt).toLocaleDateString()}</p>
                                             </div>
                                             <div className="flex items-center gap-1 mb-2">
@@ -911,9 +1092,10 @@ export default function AdminPage() {
                                             <div className="flex gap-2">
                                                 {!review.approved ? (
                                                     <button onClick={() => handleApproveReview(review.id)}
-                                                        className="flex-1 text-xs font-bold py-2.5 rounded-full transition-all hover:opacity-80"
+                                                        disabled={reviewActionId === review.id}
+                                                        className="flex-1 text-xs font-bold py-2.5 rounded-full transition-all hover:opacity-80 disabled:opacity-50"
                                                         style={{ backgroundColor: 'var(--green-light)', color: 'var(--green)' }}>
-                                                        Approve
+                                                        {reviewActionId === review.id ? 'Approving…' : 'Approve'}
                                                     </button>
                                                 ) : (
                                                     <span className="flex-1 text-xs font-bold py-2.5 rounded-full text-center"
@@ -922,9 +1104,10 @@ export default function AdminPage() {
                                                     </span>
                                                 )}
                                                 <button onClick={() => handleDeleteReview(review.id)}
-                                                    className="flex-1 text-xs font-bold py-2.5 rounded-full transition-all hover:opacity-80"
+                                                    disabled={reviewActionId === review.id}
+                                                    className="flex-1 text-xs font-bold py-2.5 rounded-full transition-all hover:opacity-80 disabled:opacity-50"
                                                     style={{ backgroundColor: '#FEE2E2', color: '#DC2626' }}>
-                                                    Delete
+                                                    {reviewActionId === review.id ? 'Deleting…' : 'Delete'}
                                                 </button>
                                             </div>
                                         </div>
@@ -933,6 +1116,147 @@ export default function AdminPage() {
                             )}
                         </div>
                     )}
+
+                    {/* Insights View */}
+                    {activeView === 'insights' && (
+                        <div className="max-w-7xl mx-auto">
+                            <div className="mb-8">
+                                <h2 className="text-3xl font-extrabold mb-2 tracking-tight" style={{ color: 'var(--foreground)' }}>Insights</h2>
+                                <p className="text-base font-medium" style={{ color: 'var(--gray-500)' }}>Analytics and performance metrics.</p>
+                            </div>
+
+                            {/* Revenue & Orders Summary */}
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                                {(() => {
+                                    const totalRevenue = allOrders.reduce((s, o) => s + (o.total || 0), 0);
+                                    const deliveredOrders = allOrders.filter(o => o.status === 'delivered');
+                                    const deliveredRevenue = deliveredOrders.reduce((s, o) => s + (o.total || 0), 0);
+                                    const avgOrderValue = allOrders.length > 0 ? totalRevenue / allOrders.length : 0;
+                                    const avgRating = allReviews.length > 0 ? allReviews.reduce((s, r) => s + r.rating, 0) / allReviews.length : 0;
+                                    return [
+                                        { label: 'Total Revenue', value: `₹${totalRevenue.toLocaleString('en-IN')}`, sub: `${allOrders.length} orders`, color: 'var(--green)' },
+                                        { label: 'Delivered Revenue', value: `₹${deliveredRevenue.toLocaleString('en-IN')}`, sub: `${deliveredOrders.length} delivered`, color: '#2563EB' },
+                                        { label: 'Avg Order Value', value: `₹${Math.round(avgOrderValue).toLocaleString('en-IN')}`, sub: 'per order', color: 'var(--accent)' },
+                                        { label: 'Avg Rating', value: avgRating.toFixed(1), sub: `${allReviews.length} reviews`, color: '#D97706' },
+                                    ].map(stat => (
+                                        <div key={stat.label} className="bg-white rounded-2xl p-5" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                            <p className="text-xs font-semibold mb-2" style={{ color: 'var(--gray-400)' }}>{stat.label}</p>
+                                            <p className="text-2xl font-extrabold tracking-tight" style={{ color: stat.color }}>{stat.value}</p>
+                                            <p className="text-xs mt-1" style={{ color: 'var(--gray-400)' }}>{stat.sub}</p>
+                                        </div>
+                                    ));
+                                })()}
+                            </div>
+
+                            {/* Revenue by Day (last 7 days) */}
+                            <div className="bg-white rounded-2xl p-6 mb-6" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                <h3 className="text-sm font-bold mb-6" style={{ color: 'var(--foreground)' }}>Revenue — Last 7 Days</h3>
+                                {(() => {
+                                    const days: { label: string; revenue: number; orders: number }[] = [];
+                                    for (let i = 6; i >= 0; i--) {
+                                        const d = new Date(); d.setDate(d.getDate() - i);
+                                        const ds = d.toISOString().split('T')[0];
+                                        const dayOrders = allOrders.filter(o => o.createdAt?.startsWith(ds));
+                                        days.push({ label: d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric' }), revenue: dayOrders.reduce((s, o) => s + (o.total || 0), 0), orders: dayOrders.length });
+                                    }
+                                    const maxRev = Math.max(...days.map(d => d.revenue), 1);
+                                    return (
+                                        <div className="flex items-end gap-3 h-40">
+                                            {days.map((day, i) => (
+                                                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                                                    <span className="text-[10px] font-bold" style={{ color: 'var(--foreground)' }}>
+                                                        {day.revenue > 0 ? `₹${day.revenue.toLocaleString('en-IN')}` : '—'}
+                                                    </span>
+                                                    <div className="w-full rounded-t-lg transition-all duration-500" style={{
+                                                        height: `${Math.max((day.revenue / maxRev) * 100, 4)}%`,
+                                                        backgroundColor: day.revenue > 0 ? 'var(--green)' : 'var(--gray-200)',
+                                                        minHeight: '4px',
+                                                    }} />
+                                                    <span className="text-[10px]" style={{ color: 'var(--gray-400)' }}>{day.label}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    );
+                                })()}
+                            </div>
+
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                                {/* Top Products by Orders */}
+                                <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                    <h3 className="text-sm font-bold mb-4" style={{ color: 'var(--foreground)' }}>Top Products</h3>
+                                    {(() => {
+                                        const productSales: Record<string, { title: string; qty: number; revenue: number }> = {};
+                                        for (const order of allOrders) {
+                                            for (const item of (order.items as any[] || [])) {
+                                                const it = item;
+                                                const prod = (it.product || {}) as Record<string, unknown>;
+                                                const pid = (prod.id || it.productId || 'unknown') as string;
+                                                const title = (prod.title || it.title || 'Unknown') as string;
+                                                const price = (prod.sellingPrice || it.price || 0) as number;
+                                                const qty = (it.quantity || 1) as number;
+                                                if (!productSales[pid]) productSales[pid] = { title, qty: 0, revenue: 0 };
+                                                productSales[pid].qty += qty;
+                                                productSales[pid].revenue += qty * price;
+                                            }
+                                        }
+                                        const top = Object.entries(productSales).sort((a, b) => b[1].revenue - a[1].revenue).slice(0, 5);
+                                        if (top.length === 0) return <p className="text-xs py-4 text-center" style={{ color: 'var(--gray-400)' }}>No sales data yet.</p>;
+                                        return (
+                                            <div className="space-y-3">
+                                                {top.map(([pid, data], i) => (
+                                                    <div key={pid} className="flex items-center gap-3">
+                                                        <span className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ backgroundColor: i === 0 ? 'var(--accent)' : 'var(--gray-300)' }}>{i + 1}</span>
+                                                        <div className="flex-1 min-w-0">
+                                                            <p className="text-sm font-medium truncate" style={{ color: 'var(--foreground)' }}>{data.title}</p>
+                                                            <p className="text-xs" style={{ color: 'var(--gray-400)' }}>{data.qty} sold</p>
+                                                        </div>
+                                                        <p className="text-sm font-bold" style={{ color: 'var(--green)' }}>₹{data.revenue.toLocaleString('en-IN')}</p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        );
+                                    })()}
+                                </div>
+
+                                {/* Review Stats */}
+                                <div className="bg-white rounded-2xl p-6" style={{ border: '1px solid var(--gray-200)', boxShadow: 'var(--shadow-sm)' }}>
+                                    <h3 className="text-sm font-bold mb-4" style={{ color: 'var(--foreground)' }}>Review Breakdown</h3>
+                                    {allReviews.length === 0 ? (
+                                        <p className="text-xs py-4 text-center" style={{ color: 'var(--gray-400)' }}>No reviews yet.</p>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {[5, 4, 3, 2, 1].map(star => {
+                                                const count = allReviews.filter(r => r.rating === star).length;
+                                                const pct = (count / allReviews.length) * 100;
+                                                return (
+                                                    <div key={star} className="flex items-center gap-3">
+                                                        <span className="text-xs font-semibold w-8" style={{ color: 'var(--gray-600)' }}>{star} ★</span>
+                                                        <div className="flex-1 h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--gray-100)' }}>
+                                                            <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: 'var(--accent)' }} />
+                                                        </div>
+                                                        <span className="text-xs font-bold w-8 text-right" style={{ color: 'var(--foreground)' }}>{count}</span>
+                                                    </div>
+                                                );
+                                            })}
+                                            <div className="pt-3 mt-3 flex items-center justify-between" style={{ borderTop: '1px solid var(--gray-200)' }}>
+                                                <span className="text-xs" style={{ color: 'var(--gray-400)' }}>Pending moderation</span>
+                                                <span className="text-xs font-bold px-2 py-1 rounded-full" style={{ backgroundColor: '#FEF3C7', color: '#D97706' }}>
+                                                    {allReviews.filter(r => !r.approved).length}
+                                                </span>
+                                            </div>
+                                            <div className="flex items-center justify-between">
+                                                <span className="text-xs" style={{ color: 'var(--gray-400)' }}>Verified purchases</span>
+                                                <span className="text-xs font-bold px-2 py-1 rounded-full" style={{ backgroundColor: 'var(--green-light)', color: 'var(--green)' }}>
+                                                    {allReviews.filter(r => r.verifiedPurchase).length}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                 </div>
             </main>
 
