@@ -1,10 +1,18 @@
 (() => {
   // ── Config ──────────────────────────────────────────────────────────────
-  // Change this to your deployed Veedu URL
   const VEEDU_API =
-    document.currentScript?.dataset?.api ||
     localStorage.getItem('veedu_api') ||
     'https://veedu-26.vercel.app';
+
+  // API key loaded from chrome.storage at init
+  let cachedApiKey = '';
+  chrome.storage.local.get(['veedu_key'], (result) => {
+    cachedApiKey = result.veedu_key || '';
+  });
+  // Also react to changes (e.g. popup saves key while page is open)
+  chrome.storage.onChanged.addListener((changes) => {
+    if (changes.veedu_key) cachedApiKey = changes.veedu_key.newValue || '';
+  });
 
   // ── Product data extraction ─────────────────────────────────────────────
   function extractProduct() {
@@ -47,7 +55,6 @@
         imgSet.add(img.src.replace(/_([\d]+)\.(jpg|jpeg|webp|png)(\?.*)?$/i, '_1024.$2$3'));
       }
     });
-    // Also grab from srcset and background-image
     document.querySelectorAll('[srcset*="images.meesho.com"]').forEach(el => {
       const matches = el.getAttribute('srcset')?.match(/images\.meesho\.com\/images\/products\/[^"'\s,]+/g) || [];
       matches.forEach(m => imgSet.add(`https://${m}`.replace(/_([\d]+)\.(jpg|jpeg|webp|png)(\?.*)?$/i, '_1024.$2$3')));
@@ -65,6 +72,24 @@
       images: [...imgSet].slice(0, 6),
       description,
     };
+  }
+
+  // ── Send product to API ─────────────────────────────────────────────────
+  async function sendProduct(product) {
+    const headers = { 'Content-Type': 'application/json' };
+    const key = cachedApiKey;
+    if (key) headers['x-veedu-key'] = key;
+
+    const res = await fetch(`${VEEDU_API}/api/admin/scrape-meesho`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(product),
+    });
+
+    if (res.status === 401) throw new Error('AUTH');
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || 'Import failed');
+    return data;
   }
 
   // ── Floating import button ──────────────────────────────────────────────
@@ -127,7 +152,7 @@
     setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3500);
   }
 
-  // ── Import handler ──────────────────────────────────────────────────────
+  // ── Import handler (manual button click) ───────────────────────────────
   async function handleImport() {
     const btn = document.getElementById('veedu-import-btn');
     if (!btn) return;
@@ -138,35 +163,22 @@
 
     try {
       const product = extractProduct();
-
       if (!product.title || !product.price) {
         showToast('Could not read product data. Try scrolling down first.', true);
         return;
       }
 
-      const res = await fetch(`${VEEDU_API}/api/admin/scrape-meesho`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(product),
-      });
-
-      if (res.status === 401) {
-        showToast('Not logged in. Open Veedu admin and log in first.', true);
-        return;
-      }
-
-      const data = await res.json();
-      if (res.ok && data.success) {
-        showToast(`✓ "${product.title.slice(0, 40)}…" imported!`);
-        btn.innerHTML = '✓ Imported!';
-        btn.style.background = '#2E7D32';
-        setTimeout(() => { btn.innerHTML = originalText; btn.style.background = 'linear-gradient(135deg, #4CAF50, #2E7D32)'; }, 3000);
-      } else {
-        showToast(data.error || 'Import failed', true);
-      }
+      await sendProduct(product);
+      showToast(`✓ "${product.title.slice(0, 40)}…" imported!`);
+      btn.innerHTML = '✓ Imported!';
+      btn.style.background = '#2E7D32';
+      setTimeout(() => { btn.innerHTML = originalText; btn.style.background = 'linear-gradient(135deg, #4CAF50, #2E7D32)'; }, 3000);
     } catch (err) {
-      showToast('Network error — is Veedu running?', true);
+      if (err.message === 'AUTH') {
+        showToast('Set your API key in the extension popup first.', true);
+      } else {
+        showToast(err.message || 'Network error', true);
+      }
       console.error('[Veedu]', err);
     } finally {
       btn.style.pointerEvents = 'auto';
@@ -174,8 +186,22 @@
     }
   }
 
+  // ── Listen for auto-import message from popup ──────────────────────────
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.action === 'auto-import') {
+      const product = extractProduct();
+      if (!product.title || !product.price) {
+        sendResponse({ ok: false, error: 'Could not read product. Page may not be loaded.' });
+        return true;
+      }
+      sendProduct(product)
+        .then(() => sendResponse({ ok: true, title: product.title }))
+        .catch(err => sendResponse({ ok: false, error: err.message }));
+      return true; // keep channel open for async response
+    }
+  });
+
   // ── Init ────────────────────────────────────────────────────────────────
-  // Wait for page to fully hydrate (Meesho is a Next.js SPA)
   function init() {
     const h1 = document.querySelector('h1');
     if (h1 && h1.innerText.trim().length > 3) {

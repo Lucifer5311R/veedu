@@ -438,34 +438,34 @@ export default function AdminPage() {
                                     <span className="text-2xl">🧩</span>
                                     <div>
                                         <p className="text-sm font-bold" style={{ color: 'var(--foreground)' }}>Veedu Importer Extension</p>
-                                        <p className="text-xs" style={{ color: 'var(--gray-400)' }}>One-click import from any Meesho product page</p>
+                                        <p className="text-xs" style={{ color: 'var(--gray-400)' }}>Paste any Meesho URL → auto-import in one click</p>
                                     </div>
                                 </div>
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
                                     <div className="flex items-start gap-2 p-3 rounded-2xl" style={{ backgroundColor: '#F8F9FA' }}>
                                         <span className="text-base mt-0.5">1️⃣</span>
                                         <div>
-                                            <p className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>Download</p>
-                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Get the <code className="text-xs px-1 rounded" style={{ background: '#e2e8f0' }}>extension/</code> folder from the repo</p>
+                                            <p className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>Install Extension</p>
+                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Chrome → <code className="text-xs px-1 rounded" style={{ background: '#e2e8f0' }}>chrome://extensions</code> → Dev Mode → Load Unpacked</p>
                                         </div>
                                     </div>
                                     <div className="flex items-start gap-2 p-3 rounded-2xl" style={{ backgroundColor: '#F8F9FA' }}>
                                         <span className="text-base mt-0.5">2️⃣</span>
                                         <div>
-                                            <p className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>Install</p>
-                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Chrome → <code className="text-xs px-1 rounded" style={{ background: '#e2e8f0' }}>chrome://extensions</code> → Dev Mode → Load Unpacked</p>
+                                            <p className="text-xs font-semibold" style={{ color: 'var(--foreground)' }}>Set API Key</p>
+                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Click extension icon → enter your API key (same as <code className="text-xs px-1 rounded" style={{ background: '#e2e8f0' }}>VEEDU_IMPORT_KEY</code> on Vercel)</p>
                                         </div>
                                     </div>
                                     <div className="flex items-start gap-2 p-3 rounded-2xl" style={{ backgroundColor: '#F0FDF4' }}>
                                         <span className="text-base mt-0.5">3️⃣</span>
                                         <div>
                                             <p className="text-xs font-semibold" style={{ color: 'var(--green)' }}>Import!</p>
-                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Visit any Meesho product → click the green Import button</p>
+                                            <p className="text-xs" style={{ color: 'var(--gray-500)' }}>Paste a Meesho URL in the popup → click Import. It does everything automatically!</p>
                                         </div>
                                     </div>
                                 </div>
                                 <p className="text-xs" style={{ color: 'var(--gray-400)' }}>
-                                    The extension runs only on meesho.com. It reads the product page and sends data to your Veedu store. No data goes to third parties.
+                                    Or visit any Meesho product page directly — a green &quot;Import to Veedu&quot; button appears on the page.
                                 </p>
                             </div>
 

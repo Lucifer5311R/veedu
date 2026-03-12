@@ -13,7 +13,7 @@ function setCORSHeaders(res: NextResponse, origin: string) {
     res.headers.set('Access-Control-Allow-Origin', isAllowed ? origin : 'https://www.meesho.com');
     res.headers.set('Access-Control-Allow-Credentials', 'true');
     res.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.headers.set('Access-Control-Allow-Headers', 'Content-Type');
+    res.headers.set('Access-Control-Allow-Headers', 'Content-Type, x-veedu-key');
 }
 
 // OPTIONS for CORS preflight (Bookmarklet bypass)
@@ -28,11 +28,18 @@ export async function OPTIONS(req: NextRequest) {
 export async function POST(req: NextRequest) {
     const origin = req.headers.get('origin') || '';
 
-    const session = await auth();
-    if (!session) {
-        const errRes = NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-        setCORSHeaders(errRes, origin);
-        return errRes;
+    // Auth: accept either next-auth session OR x-veedu-key header
+    const importKey = process.env.VEEDU_IMPORT_KEY;
+    const headerKey = req.headers.get('x-veedu-key');
+    const keyValid = importKey && headerKey === importKey;
+
+    if (!keyValid) {
+        const session = await auth();
+        if (!session) {
+            const errRes = NextResponse.json({ error: 'Unauthorized — log in or set VEEDU_IMPORT_KEY' }, { status: 401 });
+            setCORSHeaders(errRes, origin);
+            return errRes;
+        }
     }
 
     try {
